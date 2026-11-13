@@ -1,5 +1,5 @@
 <script>
-  import { checkForUpdate, applyUpdate, shutdownPanel } from "../stores.js";
+  import { checkForUpdate, applyUpdate, shutdownPanel, saveSettings } from "../stores.js";
   import { toasts } from "../toast.js";
   import Panel from "./ui/Panel.svelte";
   import Button from "./ui/Button.svelte";
@@ -11,10 +11,16 @@
 
   /**
    * Self-update panel: reads the running version from the server (root
-   * package.json) and compares it with the latest GitHub release. "Update"
-   * closes every running server first, then hands the install to the updater.
+   * package.json) and compares it with the newest release of the selected
+   * channel. "Update" closes every running server first, then hands the install
+   * to the updater.
    */
   let { updateState = null, onUpdateStateChanged = undefined } = $props();
+
+  const CHANNELS = [
+    { id: "stable", label: "Stable", hint: "Only final releases. Recommended for everyday use." },
+    { id: "experimental", label: "Experimental", hint: "Pre-releases included: new builds arrive first, but may be unstable." },
+  ];
 
   let checking = $state(false);
   let busy = $state("");
@@ -22,6 +28,7 @@
   let updateOpen = $state(false);
   let shutdownOpen = $state(false);
   let shuttingDown = $state(false);
+  let selectedChannel = $state("");
 
   const state = $derived(updateState || {});
   const current = $derived(state.current || "0.0.0");
@@ -29,33 +36,44 @@
   const configured = $derived(state.configured !== false && state.code !== "NOT_CONFIGURED");
   const updateAvailable = $derived(!!state.updateAvailable && !!latest);
   const checkedAt = $derived(state.checkedAt ? new Date(state.checkedAt) : null);
+  const channel = $derived(selectedChannel || state.channel || "stable");
+  const channelInfo = $derived(CHANNELS.find((c) => c.id === channel) || CHANNELS[0]);
+  const suggested = $derived(state.defaultChannel || "stable");
 
   function publish(next) {
+    if (next?.channel) selectedChannel = next.channel;
     onUpdateStateChanged?.(next);
   }
 
   function describe() {
     if (checking || state.checking) return { tone: "info", text: "Checking GitHub releases…" };
     if (!configured) return { tone: "warning", text: "Release feed not configured yet. Once the repository is on GitHub this panel will offer the latest release." };
+    if (state.code === "NO_RELEASES") {
+      return {
+        tone: "warning",
+        text: channel === "stable" ? "No stable release published yet. Switch to Experimental to follow pre-releases." : "No releases published yet.",
+      };
+    }
     if (state.error) return { tone: "danger", text: state.error };
-    if (updateAvailable) return { tone: "accent", text: `Version ${latest} is available. You are on ${current}.` };
+    if (updateAvailable) return { tone: "accent", text: `Version ${latest} is available on ${channelInfo.label}. You are on ${current}.` };
     if (!state.checkedAt) return { tone: "info", text: "Not checked yet." };
-    return { tone: "success", text: `You are up to date (${current}).` };
+    return { tone: "success", text: `You are up to date on ${channelInfo.label} (${current}).` };
   }
 
   const status = $derived(describe());
 
-  async function handleCheck() {
+  async function runCheck(nextChannel, { announce = true } = {}) {
     if (checking) return;
     checking = true;
     error = "";
     try {
-      const next = await checkForUpdate();
+      const next = await checkForUpdate(nextChannel);
       publish(next);
+      if (!announce) return;
       if (next.updateAvailable) toasts.success(`Update available: ${next.latest}`);
-      else if (next.code === "NOT_CONFIGURED") toasts.info("Release feed is still a placeholder");
+      else if (next.code === "NO_RELEASES") toasts.warning("No release published on this channel yet");
       else if (next.error) toasts.error("Update check failed", next.error);
-      else toasts.success("You are up to date");
+      else toasts.success(`You are up to date on ${next.channel || nextChannel}`);
     } catch (e) {
       error = e?.message || String(e);
       toasts.error("Update check failed", e);
@@ -64,12 +82,26 @@
     }
   }
 
+  function handleCheck() {
+    return runCheck(channel);
+  }
+
+  async function selectChannel(next) {
+    const wanted = next === "experimental" ? "experimental" : "stable";
+    if (wanted === channel || checking || busy) return;
+    selectedChannel = wanted;
+    await saveSettings("update_channel", wanted).catch(() => {
+      /* the choice still applies for this session */
+    });
+    await runCheck(wanted, { announce: false });
+  }
+
   async function handleUpdate() {
     if (!latest || busy) return;
     busy = "update";
     error = "";
     try {
-      const res = await applyUpdate(latest);
+      const res = await applyUpdate(latest, channel);
       if (res?.ok) {
         toasts.success(`Updated to ${latest}. The panel is restarting…`);
       } else if (res?.code === "NOT_CONFIGURED") {
@@ -122,7 +154,7 @@
         {/if}
       </div>
       {#if latest}
-        <span class="version-latest">Latest release: v{latest}{#if state.isPrerelease} (pre-release){/if}</span>
+        <span class="version-latest">Latest on {channelInfo.label}: v{latest}{#if state.isPrerelease} (pre-release){/if}</span>
       {/if}
     </div>
     <div class="head-actions">
@@ -133,6 +165,26 @@
         <Icon name="download" size={13} /> {latest ? `Update to v${latest}` : "Update"}
       </Button>
     </div>
+  </div>
+
+  <div class="channel-row">
+    <div class="channel-switch" role="group" aria-label="Release channel">
+      {#each CHANNELS as option}
+        <button
+          type="button"
+          class="channel-btn"
+          class:active={channel === option.id}
+          aria-pressed={channel === option.id}
+          disabled={checking || !!busy}
+          title={option.hint}
+          onclick={() => selectChannel(option.id)}
+        >
+          {#if channel === option.id}<span class="channel-dot"></span>{/if}
+          {option.label}
+        </button>
+      {/each}
+    </div>
+    <span class="channel-hint">{channelInfo.hint}{#if channel !== suggested} Default for v{current} is {suggested === "stable" ? "Stable" : "Experimental"}.{/if}</span>
   </div>
 
   {#if error}
@@ -146,6 +198,7 @@
   <KeyValueList
     rows={[
       { key: "Current version", value: `v${current}` },
+      { key: "Channel", value: channelInfo.label, mono: false },
       { key: "Latest release", value: latest ? `v${latest}` : "—", mono: false },
       { key: "Release feed", value: configured ? state.feedUrl || "GitHub releases" : "Not configured", mono: false },
       { key: "Last checked", value: checkedAt ? formatDate(checkedAt) : "Never", mono: false },
@@ -166,7 +219,7 @@
 <ConfirmDialog
   bind:open={updateOpen}
   title={`Update to v${latest || ""}`}
-  message={`This closes every running server and installs version ${latest || "the latest release"}. Running instances are stopped with the graceful stop command; start them again once the update finishes.`}
+  message={`This closes every running server and installs version ${latest || "the latest release"} from the ${channelInfo.label} channel. Running instances are stopped with the graceful stop command; start them again once the update finishes.`}
   confirmLabel={busy === "update" ? "Updating…" : "Update and restart"}
   tone="warning"
   busy={busy === "update"}
@@ -193,6 +246,29 @@
   .version-value { color: var(--text); font-family: var(--font-mono); font-size: 1.08rem; letter-spacing: 0.02em; }
   .version-latest { color: var(--text-disabled); font-size: 0.74rem; }
   .head-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+  .channel-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+  .channel-switch { display: inline-flex; padding: 3px; gap: 2px; background: var(--input-bg); border: 1px solid var(--border); border-radius: var(--radius-btn); }
+  .channel-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 11px;
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+    font-weight: 600;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: calc(var(--radius-btn) - 3px);
+    cursor: pointer;
+    transition: color var(--t-fast), background var(--t-fast), border-color var(--t-fast);
+  }
+  .channel-btn:hover { color: var(--text); }
+  .channel-btn.active { color: var(--accent); background: var(--accent-light); border-color: var(--accent-ring); }
+  .channel-btn:disabled { cursor: default; opacity: 0.6; }
+  .channel-dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+  .channel-hint { color: var(--text-secondary); font-size: 0.73rem; min-width: 0; }
+
   .update-foot {
     display: flex;
     align-items: center;
@@ -209,6 +285,7 @@
 
   @media (max-width: 620px) {
     .head-actions { width: 100%; }
+    .channel-hint { flex-basis: 100%; }
     .update-foot { align-items: flex-start; }
   }
 </style>

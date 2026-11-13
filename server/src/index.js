@@ -21,7 +21,7 @@ import { sha1File, sha256File, fingerprintFile } from "./mods/http.js";
 import { modsTarget, folderForTarget } from "./mods/loaders.js";
 import { portProfile, isPortNumber, isPortBindable, allocateServerPorts, saveServerPorts, applyPortsToConfig, checkServerStartupPorts, serverPortsStatus, formatPortConflict, migrateServerPorts, PortConflictError, findPortOwner, insertServerExtraPort, updateServerExtraPort, deleteServerExtraPort, getServerExtraPorts } from "./ports.js";
 import { startPortGuard, stopPortGuard } from "./portGuard.js";
-import { appVersion, getUpdateState, applyUpdate } from "./version.js";
+import { appVersion, getUpdateState, applyUpdate, normalizeChannel, defaultChannel } from "./version.js";
 
 const streamPipeline = promisify(pipeline);
 const execFileAsync = promisify(execFile);
@@ -2934,15 +2934,24 @@ async function stopAllServers({ timeoutMs = 8000 } = {}) {
   return { ids, stopped };
 }
 
+// The channel chosen in Settings wins, then the stored preference, then the one
+// implied by the running version (pre-release builds start on experimental).
+function resolveUpdateChannel(explicit) {
+  if (explicit) return normalizeChannel(explicit);
+  const stored = getSetting("update_channel", "");
+  return normalizeChannel(stored || defaultChannel());
+}
+
 export const updatesRoute = new Elysia({ prefix: "/api/updates" })
-  .get("/", async () => getUpdateState())
-  .post("/check", async () => getUpdateState({ force: true }))
+  .get("/", async ({ query }) => getUpdateState({ channel: resolveUpdateChannel(query?.channel) }))
+  .post("/check", async ({ body }) => getUpdateState({ channel: resolveUpdateChannel(body?.channel), force: true }))
   .post("/apply", async ({ body }) => {
     const target = String(body?.version || "").trim();
-    const state = await getUpdateState({ force: true });
+    const channel = resolveUpdateChannel(body?.channel);
+    const state = await getUpdateState({ channel, force: true });
     const { ids, stopped } = await stopAllServers();
-    const result = await applyUpdate({ target, current: state.current });
-    return { ok: result.ok, code: result.code || null, message: result.message || null, target, version: state.current, servers: { total: ids.length, stopped }, applying: true };
+    const result = await applyUpdate({ target, current: state.current, channel });
+    return { ok: result.ok, code: result.code || null, message: result.message || null, target, channel, version: state.current, servers: { total: ids.length, stopped }, applying: true };
   })
   .post("/shutdown", async ({ body, set }) => {
     const reason = typeof body?.reason === "string" && body.reason.trim() ? body.reason.trim().slice(0, 200) : "Panel shutdown requested";

@@ -402,19 +402,20 @@ export async function uploadFile(serverId, path, file, { onProgress = null } = {
 
 // ---------- Panel updates ----------
 
-/** Cached server-side state: the current version plus the latest GitHub release. */
-export async function loadUpdateState() {
-  return await api("/updates", { retries: 0, timeout: 25000 });
+/** Cached server-side state: current version plus the latest release of a channel. */
+export async function loadUpdateState(channel) {
+  const q = channel ? `?channel=${encodeURIComponent(channel)}` : "";
+  return await api(`/updates${q}`, { retries: 0, timeout: 25000 });
 }
 
 /** Forces a fresh check against the GitHub releases feed. */
-export async function checkForUpdate() {
-  return await api("/updates/check", { method: "POST", retries: 0, timeout: 25000 });
+export async function checkForUpdate(channel) {
+  return await api("/updates/check", { method: "POST", body: JSON.stringify(channel ? { channel } : {}), retries: 0, timeout: 25000 });
 }
 
 /** Stops every running server and applies the target release. */
-export async function applyUpdate(version) {
-  return await api("/updates/apply", { method: "POST", body: JSON.stringify({ version }), retries: 0, timeout: 300000 });
+export async function applyUpdate(version, channel) {
+  return await api("/updates/apply", { method: "POST", body: JSON.stringify(channel ? { version, channel } : { version }), retries: 0, timeout: 300000 });
 }
 
 /** Stops every running server and exits the panel process. */

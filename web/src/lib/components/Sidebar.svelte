@@ -139,13 +139,6 @@
     width: 34px;
     height: 34px;
     flex: 0 0 auto;
-    color: #fff;
-    font-size: 0.9rem;
-    font-weight: 800;
-    background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 72%, #fff 28%), var(--accent) 70%);
-    border: 1px solid color-mix(in srgb, var(--accent) 55%, #fff);
-    border-radius: 9px;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.24), 0 6px 16px -8px var(--accent);
   }
   .brand-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.15; }
   .brand-text strong { font-size: 0.98rem; font-weight: 700; letter-spacing: -0.01em; }

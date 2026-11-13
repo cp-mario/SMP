@@ -13,7 +13,7 @@ import { existsSync } from "fs";
 import { homedir } from "os";
 import { join, resolve } from "path";
 import { fileURLToPath } from "url";
-import { appVersion, compareVersions, fetchLatestRelease, RELEASES_FEED } from "./version.js";
+import { appVersion, compareVersions, fetchLatestRelease, applyUpdate, RELEASES_FEED } from "./version.js";
 
 function bunCommand() {
   if (process.platform === "win32") {
@@ -132,6 +132,16 @@ async function main() {
         if (newer) {
           console.log("A newer version is available.");
           if (rel.url) console.log(`Release:   ${rel.url}`);
+          const channel = process.argv[3] || (rel.isPrerelease ? "experimental" : "stable");
+          console.log(`Installing ${rel.version} (${channel})…`);
+          const result = await applyUpdate({ target: rel.version, current, channel });
+          for (const step of result.steps || []) console.log(`  [${step.status}] ${step.label}`);
+          if (!result.ok) {
+            console.error(`Update failed: ${result.message}`);
+            process.exitCode = 1;
+          } else {
+            console.log(result.message);
+          }
         } else {
           console.log("You are up to date.");
         }
@@ -141,7 +151,7 @@ async function main() {
           ? "the GitHub repository is not available yet"
           : e?.message || String(e);
         console.error(`Update check failed: ${message}`);
-        if (RELEASES_FEED) console.error(`Releases: ${RELEASES_FEED}`);
+        if (RELEASES_FEED) console.error(`Releases:  ${RELEASES_FEED}`);
         process.exitCode = 1;
       }
       break;

@@ -1,19 +1,22 @@
 // SMP version + self-update helpers.
 //
 // Single source of truth: the root package.json version. The server reads it at
-// boot, the CLI prints it, and the panel compares it against the latest GitHub
-// release (stable or pre-release) to decide whether an update is available.
-import { existsSync, readFileSync } from "fs";
+// boot, the CLI prints it, and the panel compares it against the GitHub releases
+// of the selected channel (stable or experimental) to decide whether an update
+// is available.
+import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync, readdirSync, cpSync } from "fs";
+import { createHash } from "crypto";
 import { dirname, join, resolve } from "path";
 import { fileURLToPath } from "url";
+import AdmZip from "adm-zip";
+import { x as untar } from "tar";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const ROOT_DIR = resolve(__dirname, "../..");
 
-// Change these two once the repository exists on GitHub. Until then the panel
-// shows a "not configured" placeholder instead of calling a missing repository.
-// SMP_REPO=owner/name overrides it (useful to test the check against any repo).
-const DEFAULT_OWNER = "SMP-Panel";
+// The GitHub repository that publishes the releases this panel updates from.
+// SMP_REPO=owner/name overrides it (useful to test against another repo).
+const DEFAULT_OWNER = "cp-mario";
 const DEFAULT_NAME = "SMP";
 export const REPO_SLUG = (process.env.SMP_REPO || "").trim() || `${DEFAULT_OWNER}/${DEFAULT_NAME}`;
 export const REPO_OWNER = REPO_SLUG.split("/")[0] || "";
@@ -22,6 +25,7 @@ export const REPO_NAME = REPO_SLUG.split("/")[1] || "";
 export const RELEASES_API = `https://api.github.com/repos/${REPO_SLUG}/releases`;
 export const RELEASES_LATEST_API = `${RELEASES_API}/latest`;
 export const RELEASES_FEED = `https://github.com/${REPO_SLUG}/releases`;
+export const REPO_API = `https://api.github.com/repos/${REPO_SLUG}`;
 export const REPO_CONFIGURED = Boolean(REPO_OWNER && REPO_NAME);
 
 const USER_AGENT = "SMP-Panel";
@@ -46,6 +50,30 @@ export function appVersion() {
 export function isStableVersion(version) {
   const v = String(version || "").trim().replace(/^v/i, "");
   return /^\d+\.\d+\.\d+$/.test(v);
+}
+
+// ============ CHANNELS ============
+// stable        -> only releases published without the "pre-release" flag
+// experimental  -> every published release, including pre-releases
+export const CHANNELS = ["stable", "experimental"];
+export const CHANNEL_LABELS = { stable: "Stable", experimental: "Experimental" };
+export const CHANNEL_HINTS = {
+  stable: "Only final releases. Recommended for everyday use.",
+  experimental: "Pre-releases included: new builds arrive first, but may be unstable.",
+};
+
+/** Accepts `experimental`, `exp`, `true`… and falls back to `stable`. */
+export function normalizeChannel(channel) {
+  const v = String(channel || "").trim().toLowerCase();
+  return v.startsWith("exp") || v === "beta" || v === "pre" || v === "prerelease" || v === "true" || v === "1" ? "experimental" : "stable";
+}
+
+/**
+ * Channel implied by the running version: a pre-release build (0.1.2-rc.1) starts
+ * on experimental, a final one (0.1.2) on stable.
+ */
+export function defaultChannel(version = appVersion()) {
+  return isStableVersion(version) ? "stable" : "experimental";
 }
 
 /**
@@ -88,35 +116,7 @@ function pickNewest(list) {
   return [...list].sort((a, b) => compareVersions(normalizeTag(b.tag_name), normalizeTag(a.tag_name)))[0];
 }
 
-/**
- * Latest published release.
- *
- * Prefers the newest non-draft release (stable or pre-release) so the panel
- * always offers the most recent build, since the release workflow publishes a
- * pre-release on every push. Falls back to `/releases/latest` when the listing
- * cannot be read.
- */
-export async function fetchLatestRelease() {
-  if (!REPO_CONFIGURED) {
-    const err = new Error("GitHub repository is not configured yet");
-    err.code = "NOT_CONFIGURED";
-    throw err;
-  }
-
-  let release = null;
-  try {
-    const list = await githubFetch(`${RELEASES_API}?per_page=30`);
-    const published = (Array.isArray(list) ? list : []).filter((r) => r && !r.draft);
-    const stable = pickNewest(published.filter((r) => !r.prerelease));
-    const pre = pickNewest(published.filter((r) => r.prerelease));
-    // A pre-release can be newer than the last stable (0.1.1-rc > 0.1.0).
-    if (stable && pre) release = compareVersions(normalizeTag(pre.tag_name), normalizeTag(stable.tag_name)) > 0 ? pre : stable;
-    else release = stable || pre || null;
-  } catch (e) {
-    if (e?.code === "NOT_CONFIGURED" || e?.status === 404) throw e;
-  }
-
-  if (!release) release = await githubFetch(RELEASES_LATEST_API);
+function toRelease(release) {
   const version = normalizeTag(release.tag_name);
   return {
     version,
@@ -125,22 +125,86 @@ export async function fetchLatestRelease() {
     publishedAt: release.published_at || null,
     url: release.html_url || RELEASES_FEED,
     notes: release.body || "",
+    assets: Array.isArray(release.assets) ? release.assets : [],
     configured: REPO_CONFIGURED,
     feedUrl: RELEASES_FEED,
   };
 }
 
-/**
- * Compares the running version with the latest release. Never throws: failures
- * come back as `{ ok: false, code, error }` so the UI can render a placeholder.
- */
-export async function checkForUpdate() {
-  const current = appVersion();
+/** Distinguishes "no such repository" from "repository with no releases". */
+async function assertRepoExists() {
   try {
-    const release = await fetchLatestRelease();
+    await githubFetch(REPO_API);
+  } catch (e) {
+    if (e?.status === 404) {
+      const err = new Error(`The GitHub repository ${REPO_SLUG} does not exist.`);
+      err.code = "NOT_CONFIGURED";
+      throw err;
+    }
+    throw e;
+  }
+}
+
+/**
+ * Newest published release for a channel.
+ *
+ * experimental: every non-draft release, pre-releases included.
+ * stable:       only releases published without the pre-release flag.
+ */
+export async function fetchLatestRelease({ channel = "stable" } = {}) {
+  if (!REPO_CONFIGURED) {
+    const err = new Error("GitHub repository is not configured yet");
+    err.code = "NOT_CONFIGURED";
+    throw err;
+  }
+
+  const wantPrerelease = normalizeChannel(channel) === "experimental";
+  let release = null;
+
+  try {
+    const list = await githubFetch(`${RELEASES_API}?per_page=30`);
+    const published = (Array.isArray(list) ? list : []).filter((r) => r && !r.draft);
+    release = pickNewest(wantPrerelease ? published : published.filter((r) => !r.prerelease));
+  } catch (e) {
+    if (e?.code === "NOT_CONFIGURED" || e?.status === 403) throw e;
+    if (e?.status !== 404) throw e;
+    await assertRepoExists();
+  }
+
+  // Stable falls back to /releases/latest, which also ignores pre-releases.
+  if (!release && !wantPrerelease) {
+    release = await githubFetch(RELEASES_LATEST_API).catch(async (e) => {
+      if (e?.status === 403) throw e;
+      await assertRepoExists();
+      const err = new Error("No stable release published yet.");
+      err.code = "NO_RELEASES";
+      throw err;
+    });
+  }
+
+  if (!release) {
+    const err = new Error(wantPrerelease ? "No releases published yet." : "No stable release published yet.");
+    err.code = "NO_RELEASES";
+    throw err;
+  }
+
+  return toRelease(release);
+}
+
+/**
+ * Compares the running version with the channel's newest release. Never throws:
+ * failures come back as `{ ok: false, code, error }` so the UI can render them.
+ */
+export async function checkForUpdate({ channel = "stable" } = {}) {
+  const current = appVersion();
+  const wanted = normalizeChannel(channel);
+  const fallback = defaultChannel(current);
+
+  try {
+    const release = await fetchLatestRelease({ channel: wanted });
     return {
+      ...emptyState(current, fallback, wanted),
       ok: true,
-      current,
       configured: REPO_CONFIGURED,
       checking: false,
       checkedAt: Date.now(),
@@ -157,33 +221,33 @@ export async function checkForUpdate() {
     };
   } catch (e) {
     const status = e?.status || 0;
-    const notConfigured = e?.code === "NOT_CONFIGURED" || status === 404;
-    const message = notConfigured
-      ? `The GitHub repository ${REPO_SLUG} is not available yet.`
-      : e?.message || String(e);
+    const code = e?.code || (status === 403 ? "RATE_LIMITED" : "CHECK_FAILED");
     return {
+      ...emptyState(current, fallback, wanted),
       ok: false,
-      current,
       configured: REPO_CONFIGURED,
       checking: false,
       checkedAt: Date.now(),
-      latest: null,
-      latestName: null,
-      isPrerelease: false,
-      publishedAt: null,
-      releaseUrl: null,
-      releaseNotes: "",
-      feedUrl: RELEASES_FEED,
-      updateAvailable: false,
-      error: message,
-      code: notConfigured ? "NOT_CONFIGURED" : status === 403 ? "RATE_LIMITED" : "CHECK_FAILED",
+      error: e?.message || String(e),
+      code,
     };
   }
+}
+
+function emptyState(current, fallback, channel) {
+  return {
+    ...EMPTY_UPDATE_STATE,
+    current: current || "0.0.0",
+    defaultChannel: fallback,
+    channel,
+  };
 }
 
 export const EMPTY_UPDATE_STATE = Object.freeze({
   ok: null,
   current: "0.0.0",
+  defaultChannel: "stable",
+  channel: "stable",
   configured: false,
   checking: false,
   checkedAt: null,
@@ -199,78 +263,247 @@ export const EMPTY_UPDATE_STATE = Object.freeze({
   code: null,
 });
 
-// One check per panel process: the sidebar dot and the settings view both ask.
-let cachedState = { ...EMPTY_UPDATE_STATE, current: appVersion() };
-let inFlight = null;
+// One check per channel and panel process: the sidebar dot and the settings view
+// both ask for the same thing.
+const cache = new Map();
+const inFlight = new Map();
 const MIN_CHECK_INTERVAL = 5 * 60 * 1000;
 
 /** In-process cache so opening Settings does not re-hit the GitHub API. */
-export async function getUpdateState({ force = false, minIntervalMs = MIN_CHECK_INTERVAL } = {}) {
-  if (!force && inFlight) return inFlight;
-  if (!force && cachedState.checkedAt && Date.now() - cachedState.checkedAt < minIntervalMs && !cachedState.checking) {
-    return cachedState;
-  }
-  cachedState = { ...cachedState, checking: true, current: appVersion() };
+export async function getUpdateState({ force = false, channel = "", minIntervalMs = MIN_CHECK_INTERVAL } = {}) {
+  const wanted = normalizeChannel(channel || readStoredChannel());
+  const cached = cache.get(wanted);
+
+  if (!force && cached?.checkedAt && Date.now() - cached.checkedAt < minIntervalMs && !cached.checking) return cached;
+  if (!force && inFlight.has(wanted)) return inFlight.get(wanted);
+
+  const pending = { ...EMPTY_UPDATE_STATE, current: appVersion(), defaultChannel: defaultChannel(), channel: wanted, checking: true };
+  cache.set(wanted, pending);
+
   const run = (async () => {
     try {
-      cachedState = await checkForUpdate();
+      const state = await checkForUpdate({ channel: wanted });
+      cache.set(wanted, state);
+      return state;
     } finally {
-      inFlight = null;
+      inFlight.delete(wanted);
     }
-    return cachedState;
   })();
-  inFlight = run;
+  inFlight.set(wanted, run);
   return run;
 }
 
-/** Optimistic patch used while an update is being installed. */
-export function setUpdateState(patch) {
-  cachedState = { ...cachedState, ...patch };
-  return cachedState;
+// The stored channel lives in the panel database; the route injects it so this
+// module stays free of database imports.
+let storedChannel = "";
+export function setStoredChannel(channel) {
+  storedChannel = normalizeChannel(channel);
+}
+function readStoredChannel() {
+  return storedChannel;
 }
 
-export function peekUpdateState() {
-  return cachedState;
+export function peekUpdateState(channel = "") {
+  return cache.get(normalizeChannel(channel || readStoredChannel())) || null;
+}
+
+// ============ SELF-UPDATE ============
+
+function updateSteps() {
+  return [
+    { id: "stop-servers", label: "Close all active servers", status: "done" },
+    { id: "resolve", label: "Find the release on GitHub", status: "pending" },
+    { id: "download", label: "Download the release source", status: "pending" },
+    { id: "verify", label: "Verify the release checksum", status: "pending" },
+    { id: "install", label: "Replace the installation files", status: "pending" },
+    { id: "restart", label: "Restart the panel", status: "pending" },
+  ];
+}
+
+function setStep(steps, id, status) {
+  const step = steps.find((s) => s.id === id);
+  if (step) step.status = status;
+}
+
+function fail(steps, id, code, message, extra = {}) {
+  setStep(steps, id, "failed");
+  return { ok: false, code, message, steps, ...extra };
+}
+
+/** Finds a release by its version (`0.1.2` or `v0.1.2`), or null when missing. */
+async function fetchReleaseByVersion(version) {
+  const bare = String(version || "").trim().replace(/^v/i, "");
+  if (!bare) return null;
+  for (const tag of [`v${bare}`, bare]) {
+    try {
+      return toRelease(await githubFetch(`${RELEASES_API}/tags/${encodeURIComponent(tag)}`));
+    } catch (e) {
+      if (e?.status !== 404) throw e;
+    }
+  }
+  return null;
+}
+
+async function downloadFile(url, destPath) {
+  const res = await fetch(url, {
+    headers: { "User-Agent": USER_AGENT },
+    signal: AbortSignal.timeout(120000),
+  });
+  if (!res.ok) {
+    const err = new Error(`Download failed: GitHub ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
+  writeFileSync(destPath, Buffer.from(await res.arrayBuffer()));
+}
+
+function sha256File(p) {
+  return createHash("sha256").update(readFileSync(p)).digest("hex");
+}
+
+/** Source archive for a tag: zip on Windows (Expand-Archive), tar.gz elsewhere. */
+function sourceArchiveUrl(tag) {
+  const ext = process.platform === "win32" ? "zip" : "tar.gz";
+  return { ext, url: `https://github.com/${REPO_SLUG}/archive/refs/tags/${encodeURIComponent(tag)}.${ext}` };
 }
 
 /**
- * Installs the target release.
- *
- * Placeholder until the GitHub repository exists: it reports the step that would
- * run and the file that would be replaced, without touching the installation.
- *
- * When the repository is live this must:
- *   1. download the release asset (`smp.zip` / `smp.tar.gz`) plus its checksum,
- *   2. verify the checksum and unpack into a staging directory,
- *   3. stop the panel (the route already stopped every server),
- *   4. swap the installation directory and relaunch the launcher.
+ * Downloads the release source archive, trying the `v<version>` tag first and
+ * the bare version tag second.
+ */
+async function downloadSource(version, destPath) {
+  let lastErr = null;
+  for (const tag of [`v${version}`, version]) {
+    const { ext, url } = sourceArchiveUrl(tag);
+    try {
+      await downloadFile(url, destPath);
+      return { ext, tag };
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr || new Error("Download failed");
+}
+
+/**
+ * Updates the installation in place, the same way the installers work: picks the
+ * channel's release from GitHub (stable = final releases only, experimental =
+ * pre-releases included), downloads the release source archive (tar.gz on
+ * Linux/macOS, zip on Windows) and copies the whole project tree over the
+ * installation directory (ROOT_DIR: /opt/smp or C:\Program Files\smp).
  *
  * Callers must stop every running server before calling this.
  */
-export async function applyUpdate({ target = "", current = "" } = {}) {
-  const wanted = String(target || "").trim();
+export async function applyUpdate({ target = "", current = "", channel = "stable" } = {}) {
   const from = String(current || "").trim();
-  if (!from) {
-    return { ok: false, code: "NO_VERSION", message: "The running version could not be read from package.json." };
-  }
+  const wanted = String(target || "").trim();
+  const steps = updateSteps();
+
+  if (!from) return fail(steps, "install", "NO_VERSION", "The running version could not be read from package.json.");
   if (!REPO_CONFIGURED) {
     return {
       ok: false,
       code: "NOT_CONFIGURED",
-      message: "Self-update is not available yet: the GitHub repository is still a placeholder. Download the release manually from the releases page.",
-      steps: [
-        { id: "stop-servers", label: "Close all active servers", status: "done" },
-        { id: "download", label: `Download ${wanted || "the latest release"} from GitHub`, status: "pending" },
-        { id: "verify", label: "Verify the release checksum", status: "pending" },
-        { id: "install", label: "Replace the installation files", status: "pending" },
-        { id: "restart", label: "Restart the panel", status: "pending" },
-      ],
+      message: "Self-update is not available: the GitHub repository is not configured. Download the release manually from the releases page.",
+      steps,
     };
   }
-  return {
-    ok: false,
-    code: "NOT_IMPLEMENTED",
-    message: `The updater for ${REPO_SLUG} is not wired up yet.`,
-    steps: [],
-  };
+
+  let release = null;
+  let version = wanted.replace(/^v/i, "");
+
+  try {
+    release = wanted ? await fetchReleaseByVersion(wanted) : await fetchLatestRelease({ channel });
+    if (!release) return fail(steps, "resolve", "NO_RELEASE", `No release found for version ${wanted}.`);
+    version = release.version;
+    setStep(steps, "resolve", "done");
+
+    if (compareVersions(version, from) <= 0) {
+      return {
+        ok: false,
+        code: "UP_TO_DATE",
+        message: `Already up to date (${from}).`,
+        version: from,
+        releaseUrl: release.url,
+        steps,
+      };
+    }
+
+    const stage = join(ROOT_DIR, `.update-${process.pid}-${Date.now()}`);
+    mkdirSync(stage, { recursive: true });
+    try {
+      const archivePath = join(stage, "source");
+      let downloaded;
+      try {
+        downloaded = await downloadSource(version, archivePath);
+      } catch (e) {
+        return fail(steps, "download", e?.status === 404 ? "NO_SOURCE" : "DOWNLOAD_FAILED", `Could not download the ${version} source archive: ${e?.message || e}`);
+      }
+      setStep(steps, "download", "done");
+
+      // Checksum is optional: releases may publish `<archive>.sha256`.
+      const sumAsset = release.assets.find((a) => a?.name === `${downloaded.tag}.${downloaded.ext}.sha256` || a?.name === `source.${downloaded.ext}.sha256`);
+      let checksumVerified = false;
+      if (sumAsset) {
+        const sumPath = join(stage, "checksum.sha256");
+        await downloadFile(sumAsset.browser_download_url, sumPath);
+        const hex = (readFileSync(sumPath, "utf8").match(/\b[a-f0-9]{64}\b/i) || [])[0];
+        if (!hex) return fail(steps, "verify", "CHECKSUM_INVALID", "The release checksum asset has no SHA-256 digest.");
+        if (sha256File(archivePath).toLowerCase() !== hex.toLowerCase()) {
+          return fail(steps, "verify", "CHECKSUM_MISMATCH", "Checksum mismatch: the downloaded source is corrupted.");
+        }
+        checksumVerified = true;
+        setStep(steps, "verify", "done");
+      } else {
+        setStep(steps, "verify", "skipped");
+      }
+
+      let unpacked;
+      try {
+        unpacked = join(stage, "unpacked");
+        if (downloaded.ext === "zip") {
+          new AdmZip(archivePath).extractAllTo(unpacked, true);
+        } else {
+          await untar({ file: archivePath, cwd: unpacked, strip: 1 });
+        }
+      } catch (e) {
+        return fail(steps, "install", "EXTRACT_FAILED", `Could not unpack the source archive: ${e?.message || e}`);
+      }
+
+      if (!existsSync(join(unpacked, "package.json"))) {
+        return fail(steps, "install", "NO_SOURCE", "The archive does not look like an SMP source tree.");
+      }
+
+      // Copy the whole project tree over the installation directory.
+      setStep(steps, "install", "pending");
+      try {
+        cpSync(join(unpacked, "package.json"), join(ROOT_DIR, "package.json"));
+        for (const name of readdirSync(unpacked)) {
+          if (name === "package.json") continue;
+          cpSync(join(unpacked, name), join(ROOT_DIR, name), { recursive: true, force: true });
+        }
+      } catch (e) {
+        return fail(steps, "install", "INSTALL_FAILED", `Could not replace the installation files in ${ROOT_DIR}: ${e?.message || e}`);
+      }
+      setStep(steps, "install", "done");
+
+      return {
+        ok: true,
+        code: "OK",
+        message: `SMP ${version} installed in ${ROOT_DIR}. Restart the panel to finish.`,
+        version,
+        previousVersion: from,
+        channel: normalizeChannel(channel),
+        releaseUrl: release.url,
+        checksumVerified,
+        steps,
+      };
+    } finally {
+      rmSync(stage, { recursive: true, force: true });
+    }
+  } catch (e) {
+    const status = e?.status || 0;
+    const code = e?.code || (status === 403 ? "RATE_LIMITED" : "UPDATE_FAILED");
+    return { ok: false, code, message: e?.message || String(e), steps };
+  }
 }
