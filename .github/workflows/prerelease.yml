@@ -70,16 +70,30 @@ jobs:
 
       - name: Commit, tag and push the bump
         if: steps.guard.outputs.skip != 'true'
+        env:
+          VERSION: ${{ steps.bump.outputs.version }}
+          TAG: ${{ steps.bump.outputs.tag }}
         run: |
           set -euo pipefail
-          VERSION="${{ steps.bump.outputs.version }}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add package.json
           git commit -m "chore(release): v${VERSION} [skip ci]"
-          git tag "v${VERSION}"
-          git push origin "HEAD:${BRANCH}"
-          git push origin "v${VERSION}"
+          git tag "$TAG"
+          # The branch and the tag go up in a single atomic push: the tag always
+          # travels with the commit it points to, so the server never receives a
+          # tag for an object it has not accepted yet ("missing necessary
+          # objects"). A rejection leaves both refs untouched, so retrying is safe.
+          for attempt in 1 2 3 4 5; do
+            if git push --atomic origin "HEAD:${BRANCH}" "refs/tags/${TAG}"; then
+              exit 0
+            fi
+            echo "Push of ${BRANCH} + ${TAG} failed (attempt ${attempt}); retrying in $((attempt * 10))s..." >&2
+            git fetch origin "${BRANCH}" >/dev/null 2>&1 || true
+            sleep $((attempt * 10))
+          done
+          echo "Could not push ${BRANCH} + ${TAG} after 5 attempts." >&2
+          exit 1
 
       - name: Publish the pre-release
         if: steps.guard.outputs.skip != 'true'
