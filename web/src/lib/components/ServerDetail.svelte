@@ -79,6 +79,9 @@
   let javaRuntimes = $state([]);
   let jvmEdit = $state({ memoryMb: 2048, jvmArgs: "", javaVersion: "21", saving: false });
   let jvmPanelEl = $state(null);
+  let customCommand = $state("");
+  let customCommandBusy = $state(false);
+  let customCommandEl = $state(null);
 
   let modUpdates = $state([]);
   let updatesLoading = $state(false);
@@ -104,7 +107,11 @@
   const packName = $derived(server?.modpack?.title || "Modpack");
   const packVersion = $derived(server?.modpack?.version || server?.modpack?.version_id || "—");
   const editablePorts = $derived(server?.ports || []);
+  const isCustomLoader = $derived(server?.loader === "custom" || server?.loader_custom === true);
+  const visiblePorts = $derived(isCustomLoader ? (server?.ports || []).filter((p) => p.custom) : (server?.ports || []));
   const strictPorts = $derived(!!server?.strict_ports);
+  const customCommandSaved = $derived(commandText(server?.exec));
+  const customCommandDirty = $derived(!!server && customCommand.trim() !== customCommandSaved.trim());
   const connections = $derived.by(() => {
     if (!server) return [];
     const rows = [];
@@ -156,6 +163,36 @@
     return u === "G" || u === "GB" ? n * 1024 : n;
   }
 
+  function parseExecValue(value) {
+    if (!value) return null;
+    if (typeof value === "object" && !Array.isArray(value)) return value;
+    try {
+      const parsed = JSON.parse(String(value));
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function commandText(value) {
+    const exec = parseExecValue(value);
+    if (!exec) return "";
+    if (typeof exec.raw === "string" && exec.raw.trim()) return exec.raw.trim();
+    const command = String(exec.command || "").trim();
+    if (!command) return "";
+    const args = Array.isArray(exec.args) ? exec.args.map((a) => String(a)) : [];
+    return [command, ...args].join(" ");
+  }
+
+  function splitCommand(raw) {
+    const tokens = [];
+    const re = /"([^"]*)"|'([^']*)'|(\S+)/g;
+    let match;
+    const text = String(raw || "");
+    while ((match = re.exec(text))) tokens.push(match[1] ?? match[2] ?? match[3]);
+    return tokens;
+  }
+
   async function loadDetail({ quiet = false, updates = false } = {}) {
     try {
       const data = await loadServer(id, { updates });
@@ -172,6 +209,7 @@
       // Never overwrite the field the user is typing in (the source of the "jumping" inputs).
       const editingJvm = !!(jvmPanelEl && typeof document !== "undefined" && jvmPanelEl.contains(document.activeElement));
       const editingPort = !!(portPanelEl && typeof document !== "undefined" && portPanelEl.contains(document.activeElement));
+      const editingCommand = !!(customCommandEl && typeof document !== "undefined" && customCommandEl.contains(document.activeElement));
       if (changed) server = data;
       if (!editingPort) syncPortEdits();
       if (!editingJvm) {
@@ -180,6 +218,7 @@
         jvmEdit.jvmArgs = source.jvm_args || "";
         jvmEdit.javaVersion = source.java_version || "21";
       }
+      if (!editingCommand) customCommand = commandText((server || data).exec);
       if (!quiet || !editingJvm) loadError = "";
     } catch (e) {
       if (!quiet && !server) loadError = e?.message || String(e);
@@ -310,6 +349,24 @@
       toasts.error("Could not save settings", e);
     } finally {
       jvmEdit.saving = false;
+    }
+  }
+
+  async function saveCustomCommand() {
+    if (!server || !isCustomLoader || customCommandBusy || !customCommandDirty) return;
+    const raw = customCommand.trim();
+    const tokens = splitCommand(raw);
+    if (!tokens.length) return toasts.error("Write the full start command");
+    const [command, ...args] = tokens;
+    customCommandBusy = true;
+    try {
+      await updateServer(id, { exec: { type: "custom", command, args, jar: server.jar || "server.jar", manual: true, raw } });
+      await loadDetail({ quiet: true });
+      toasts.success("Start command saved. Restart the server to apply it.");
+    } catch (e) {
+      toasts.error("Could not save the start command", e);
+    } finally {
+      customCommandBusy = false;
     }
   }
 
@@ -880,6 +937,7 @@
   {:else if activeTab === "settings"}
     <div class="detail-grid">
       <div class="main-col">
+        {#if !isCustomLoader}
         <Panel title="Updates" icon="refresh">
           <div class="update-list">
             <div class="update-row">
@@ -912,6 +970,7 @@
             <Button size="sm" variant="outline" loading={updatesBusy} onclick={checkForUpdates}><Icon name="refresh" size={13} /> Check for updates</Button>
           </div>
         </Panel>
+        {/if}
 
         <Panel title="Loader & version" icon="layers">
           <KeyValueList
@@ -927,11 +986,27 @@
           {#if server.online === 1}<div class="muted foot-note">Stop the server to change the loader or version.</div>{/if}
         </Panel>
 
+        {#if isCustomLoader}
+          <Panel title="Start command" icon="terminal" subtitle="Full command used to launch this server">
+            <div class="jvm-fields" bind:this={customCommandEl}>
+              <TextField
+                bind:value={customCommand}
+                label="Command"
+                placeholder="java -Xmx2G -jar server.jar nogui"
+                hint="Runs from the server folder, without a shell. Use quotes for paths with spaces."
+              />
+              <div class="row-actions">
+                <Button size="sm" variant="primary" loading={customCommandBusy} disabled={!customCommandDirty} idle={!customCommandDirty} onclick={saveCustomCommand}><Icon name="save" size={13} /> Save command</Button>
+              </div>
+            </div>
+          </Panel>
+        {/if}
+
         <Panel title="Server & network" icon="server">
           <div class="jvm-fields" bind:this={portPanelEl}>
-            {#if (server.ports || []).length > 0}
+            {#if visiblePorts.length > 0}
               <div class="port-list">
-                {#each server.ports as p}
+                {#each visiblePorts as p}
                   <div class="port-row" class:conflict={!!p.conflict}>
                     <span class="port-role" title={portHelp[p.role] || ""}>{p.label}</span>
                     <span class="port-proto">{p.protocol.toUpperCase()}</span>
@@ -957,10 +1032,14 @@
               </div>
               <div class="row-actions">
                 <Button size="sm" variant="primary" loading={portBusy} disabled={!portDirty} idle={!portDirty} onclick={savePorts}><Icon name="save" size={13} /> Save all ports</Button>
-                <Button size="sm" variant="outline" loading={autoBusy} disabled={server.online === 1} onclick={autoFixPorts} title={server.online === 1 ? "Stop the server first" : "Move colliding or occupied ports to free ones"}><Icon name="refresh" size={13} /> Auto-assign free</Button>
+                {#if !isCustomLoader}
+                  <Button size="sm" variant="outline" loading={autoBusy} disabled={server.online === 1} onclick={autoFixPorts} title={server.online === 1 ? "Stop the server first" : "Move colliding or occupied ports to free ones"}><Icon name="refresh" size={13} /> Auto-assign free</Button>
+                {/if}
               </div>
               <div class="muted foot-note">Ports are reserved per transport (TCP/UDP), so Java and Bedrock servers can share a number.</div>
-              <div class="muted foot-note">Game: player connections · Query: server list / monitoring · RCON: remote console.</div>
+              {#if !isCustomLoader}
+                <div class="muted foot-note">Game: player connections · Query: server list / monitoring · RCON: remote console.</div>
+              {/if}
             {/if}
             <div class="extra-ports">
               <div class="extra-ports-title">Plugin / extra ports</div>
@@ -1012,7 +1091,7 @@
               </div>
             </div>
           {:else}
-            <Alert tone="info">This loader ({server.loader}) does not use managed Java / RAM settings.</Alert>
+            <Alert tone="info">{isCustomLoader ? "This loader uses your custom start command. Set RAM and JVM flags there." : `This loader (${server.loader}) does not use managed Java / RAM settings.`}</Alert>
           {/if}
         </Panel>
       </div>
@@ -1083,6 +1162,7 @@
       {#if server}
         <StoreBrowser
           servers={[{ id: server.id, name: server.name, loader: server.loader, loader_version: server.loader_version }]}
+          {systemInfo}
           bind:targetServerId={storeTarget}
           onInstalled={() => { loadDetail({ quiet: true }); loadModUpdatesList({ force: true }); }}
         />

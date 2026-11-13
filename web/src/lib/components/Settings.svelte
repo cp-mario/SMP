@@ -1,5 +1,5 @@
 <script>
-  import { saveSettings, loadSettings, loadJava, installJavaVersion, uninstallJavaVersion, loadPanelPaths, wipePanelData } from "../stores.js";
+  import { saveSettings, loadSettings, loadJava, loadJavaInstalled, installJavaVersion, uninstallJavaVersion, loadPanelPaths, wipePanelData, MANAGED_JAVA_VERSIONS } from "../stores.js";
   import { toasts } from "../toast.js";
   import Panel from "./ui/Panel.svelte";
   import Button from "./ui/Button.svelte";
@@ -21,8 +21,28 @@
   let saving = $state(false);
   let loadError = $state("");
 
-  let javaInfo = $state({ available: [], installed: [], detected: [], runtimes: [], javaDir: "" });
+  const FALLBACK_JAVA = MANAGED_JAVA_VERSIONS.map((v) => ({ ...v, installed: false, managed: true }));
+
+  function hasJavaSeed() {
+    return !!appState?.javaInfo?.available?.length;
+  }
+
+  function initialJavaInfo() {
+    // The runtime index is fixed and App already loaded it on boot, so the
+    // section can paint its full content immediately.
+    const seed = appState?.javaInfo;
+    return {
+      available: seed?.available?.length ? seed.available : FALLBACK_JAVA,
+      installed: seed?.installed || [],
+      detected: seed?.detected || [],
+      runtimes: seed?.runtimes || [],
+      javaDir: seed?.javaDir || "",
+    };
+  }
+
+  let javaInfo = $state(initialJavaInfo());
   let javaLoading = $state(false);
+  let javaDetectedReady = $state(hasJavaSeed());
   let javaBusy = $state("");
   let javaError = $state("");
   let removeTarget = $state(null);
@@ -101,21 +121,40 @@
       loadError = e?.message || String(e);
     }
     loadPanelPaths().then((p) => { panelPaths = p; }).catch(() => { /* paths stay empty */ });
-    await refreshJava();
   }
 
-  async function refreshJava() {
+  function publishJava(info) {
+    javaInfo = info;
+    if (appState) {
+      appState.javaRuntimes = info.runtimes || [];
+      appState.detectedJava = info.detected || [];
+      appState.javaInfo = info;
+    }
+    onJavaChanged?.(info);
+  }
+
+  async function refreshJava({ full = true } = {}) {
     javaLoading = true;
     javaError = "";
     try {
+      // Which runtimes are installed is a directory listing, so the cards get
+      // accurate buttons without waiting for the system Java scan.
+      const status = await loadJavaInstalled();
+      const ids = new Set(status.installedIds || []);
+      publishJava({
+        ...javaInfo,
+        installed: status.installed || [],
+        available: (javaInfo.available?.length ? javaInfo.available : FALLBACK_JAVA).map((v) => ({ ...v, installed: ids.has(String(v.id)) })),
+        javaDir: status.javaDir || javaInfo.javaDir,
+      });
+      if (!full) return;
       const info = await loadJava();
-      javaInfo = info;
-      if (appState) {
-        appState.javaRuntimes = info.runtimes || [];
-        appState.detectedJava = info.detected || [];
-        appState.javaInfo = info;
-      }
-      onJavaChanged?.(info);
+      const managedIds = new Set((info.installed || []).map((j) => String(j.id)));
+      publishJava({
+        ...info,
+        available: MANAGED_JAVA_VERSIONS.map((v) => ({ ...v, installed: managedIds.has(String(v.id)), managed: true })),
+      });
+      javaDetectedReady = true;
     } catch (e) {
       javaError = e?.message || String(e);
     } finally {
@@ -222,6 +261,12 @@
   }
 
   load();
+  if (hasJavaSeed()) {
+    // Boot already fetched the runtimes; only confirm what is installed.
+    refreshJava({ full: false });
+  } else {
+    refreshJava();
+  }
 </script>
 
 <header class="page-header">
@@ -300,40 +345,37 @@
 
     <Panel title="Managed Java" icon="coffee" subtitle="Downloaded into the panel data directory">
       <div class="panel-head-actions">
-        <Button size="sm" variant="outline" loading={javaLoading} onclick={refreshJava}><Icon name="refresh" size={13} /> Rescan</Button>
+        <Button size="sm" variant="outline" loading={javaLoading} onclick={() => refreshJava()}><Icon name="refresh" size={13} /> Rescan</Button>
       </div>
       {#if javaError}<Alert tone="danger">{javaError}</Alert>{/if}
-      {#if javaLoading && !javaInfo.available.length}
-        <Spinner label="Detecting Java…" />
-      {:else}
-        <div class="java-grid">
-          {#each javaInfo.available as v}
-            <div class="java-card" class:installed={v.installed}>
-              <div class="java-icon"><Icon name="coffee" size={17} /></div>
-              <div class="java-main">
-                <div class="java-title">{v.name}{#if v.lts}<Badge tone="accent">LTS</Badge>{/if}</div>
-                <div class="muted java-sub">{v.installed ? "Installed in the java folder" : "Available to install"}</div>
-              </div>
-              <div class="java-actions">
-                {#if v.installed}
-                  <Badge tone="success">Installed</Badge>
-                  <Button size="xs" variant="outline" disabled={!!javaBusy} onclick={() => askRemove(v.id)}><Icon name="trash" size={12} /> Remove</Button>
-                {:else}
-                  <Button size="xs" variant="primary" loading={javaBusy === `install:${v.id}`} disabled={!!javaBusy} onclick={() => handleInstall(v.id)}><Icon name="download" size={12} /> Install</Button>
-                {/if}
-              </div>
+      <div class="java-grid">
+        {#each javaInfo.available as v}
+          <div class="java-card" class:installed={v.installed}>
+            <div class="java-icon"><Icon name="coffee" size={17} /></div>
+            <div class="java-main">
+              <div class="java-title"><span class="java-name" title={v.name}>{v.name}</span>{#if v.lts}<Badge tone="accent">LTS</Badge>{/if}</div>
+              <div class="muted java-sub">{v.installed ? "Installed" : "Available to install"}</div>
             </div>
-          {:else}
-            <EmptyState icon="coffee" size="sm" title="No installable runtimes listed" description="The Java index could not be loaded." />
-          {/each}
-        </div>
-      {/if}
+            <div class="java-actions">
+              {#if v.installed}
+                <Button size="xs" variant="outline" disabled={!!javaBusy} onclick={() => askRemove(v.id)}><Icon name="trash" size={12} /> Remove</Button>
+              {:else}
+                <Button size="xs" variant="primary" loading={javaBusy === `install:${v.id}`} disabled={!!javaBusy} onclick={() => handleInstall(v.id)}><Icon name="download" size={12} /> Install</Button>
+              {/if}
+            </div>
+          </div>
+        {:else}
+          <EmptyState icon="coffee" size="sm" title="No installable runtimes listed" description="The Java index could not be loaded." />
+        {/each}
+      </div>
     </Panel>
   </div>
 
 <div class="java-row">
   <Panel title="Detected Java" icon="cpu" subtitle="System runtimes">
-    {#if (javaInfo.detected || []).length}
+    {#if !javaDetectedReady && javaLoading}
+      <Spinner label="Detecting Java…" size={16} />
+    {:else if (javaInfo.detected || []).length}
       <div class="detected-list">
         {#each javaInfo.detected as j}
           <div class="detected-row" title={j.path || j.source || ""}>
@@ -393,6 +435,10 @@
     </div>
   {/if}
 </Panel>
+
+<footer class="legal-note">
+  Minecraft es una marca registrada de Mojang Studios AB. SMP es un proyecto independiente y no está afiliado, patrocinado ni respaldado por Mojang Studios, ni Microsoft.
+</footer>
 </div>
 
 <ConfirmDialog
@@ -535,11 +581,13 @@
 
   /* ---------- Java ---------- */
   .panel-head-actions { display: flex; justify-content: flex-end; margin-bottom: 10px; }
-  .java-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+  .java-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 10px; }
   .java-card {
-    display: flex;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
     align-items: center;
-    gap: 10px;
+    column-gap: 10px;
+    row-gap: 5px;
     padding: 11px 13px;
     background: var(--input-bg);
     border: 1px solid var(--border);
@@ -550,6 +598,7 @@
   .java-card.installed { border-color: var(--success-border); background: color-mix(in srgb, var(--input-bg) 90%, var(--success) 10%); }
   .java-icon {
     display: grid;
+    grid-row: 1;
     place-items: center;
     width: 34px;
     height: 34px;
@@ -560,10 +609,19 @@
     border-radius: 8px;
   }
   .java-card.installed .java-icon { color: var(--success); background: var(--success-soft); border-color: var(--success-border); }
-  .java-main { min-width: 0; flex: 1; }
-  .java-title { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 0.87rem; font-weight: 600; }
-  .java-sub { margin-top: 2px; font-size: 0.73rem; }
-  .java-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
+  .java-main { grid-column: 2; min-width: 0; }
+  .java-title { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; font-size: 0.87rem; font-weight: 600; }
+  .java-name { min-width: 0; overflow-wrap: anywhere; }
+  .java-sub { margin-top: 1px; font-size: 0.73rem; }
+  .java-actions {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    flex-wrap: wrap;
+    padding-top: 2px;
+  }
 
   /* ---------- Danger zone ---------- */
   .wipe-options { display: flex; flex-direction: column; gap: 8px; }
@@ -610,6 +668,8 @@
     border-top: 1px solid var(--border);
   }
   .wipe-hint { color: var(--text-secondary); font-size: 0.74rem; min-width: 0; }
+
+  .legal-note { color: var(--text-disabled); font-size: 0.7rem; line-height: 1.5; text-align: center; padding: 4px 8px 0; }
 
   @media (max-width: 1100px) {
     .java-row { grid-template-columns: minmax(0, 1fr); }

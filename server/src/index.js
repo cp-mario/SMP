@@ -922,7 +922,20 @@ async function startServerById(id, row) {
   const exec = (savedExec && typeof savedExec === "object") ? { ...savedExec, command: savedExec.command || "java" }
     : loader ? loader.getExecution({ jar, row: r, dir }) : { type: "java", command: "java", args: [`-Xmx${r.memory_max || "2G"}`, `-Xms${r.memory_min || "512M"}`, "-jar", jar, "nogui"], jar };
   const targetPath = exec.command && !exec.command.includes("/") && !exec.command.includes("\\") ? null : resolve(dir, exec.command || jar);
-  if (exec.type !== "custom" || exec.command) {
+  if (exec.type === "custom") {
+    if (!exec.command) {
+      logLine(id, `Error: Custom loader has no launch command configured. Set it in Settings → Start command.`);
+      return new Response(JSON.stringify({ ok: false, error: "Custom loader: no launch command configured." }), { status: 400, headers: { "Content-Type": "application/json" } });
+    }
+    // The command is user-provided: only check an explicit executable/script
+    // path. A bare command (java, node…) is resolved through PATH, and the jar
+    // used may not be server.jar, so it must not be required here.
+    if (targetPath && !existsSync(targetPath)) {
+      const hint = `Start command not found (${targetPath}). Check the command in Settings → Start command.`;
+      logLine(id, `Error: ${hint}`);
+      return new Response(JSON.stringify({ ok: false, error: hint }), { status: 400, headers: { "Content-Type": "application/json" } });
+    }
+  } else {
     let mustExist = null;
     if (exec.argsFile) mustExist = resolve(dir, exec.argsFile);
     else if (exec.type === "java") mustExist = join(dir, exec.jar || jar);
@@ -934,9 +947,6 @@ async function startServerById(id, row) {
       logLine(id, `Error: ${hint}`);
       return new Response(JSON.stringify({ ok: false, error: hint }), { status: 400, headers: { "Content-Type": "application/json" } });
     }
-  } else {
-    logLine(id, `Error: Custom loader has no launch command configured. Place server.jar or configure execution.`);
-    return new Response(JSON.stringify({ ok: false, error: "Custom loader: no launch command configured." }), { status: 400, headers: { "Content-Type": "application/json" } });
   }
   if (loader && loader.requiresEula()) try { writeServerEula(id, true); } catch {}
 
@@ -1254,7 +1264,26 @@ export const serversRoute = new Elysia({ prefix: "/api/servers" })
     for (const key of ["backup_on_stop", "backup_on_update", "backup_on_loader", "backup_auto_prune"]) {
       if (body[key] !== undefined) body[key] = flagValue(body[key]);
     }
-    const allowedFields = ["name", "loader", "loader_version", "loader_build", "loader_channel", "java_version", "jar", "memory_min", "memory_max", "jvm_args", "port", "motd", "auto_start", "backup_limit", "backup_on_stop", "backup_on_update", "backup_on_loader", "backup_auto_prune"];
+    if (body.exec !== undefined) {
+      // Custom start command: store the executable + args the launcher spawns.
+      const execLoader = String(body.loader !== undefined ? body.loader : row.loader || "");
+      const execMeta = (getLoader(execLoader) || { meta: () => ({}) }).meta?.() || {};
+      if (!execMeta.custom) {
+        return new Response(JSON.stringify({ error: "Start command is only available for custom loaders" }), { status: 400, headers: { "Content-Type": "application/json" } });
+      }
+      const rawExec = typeof body.exec === "string" ? body.exec : JSON.stringify(body.exec);
+      const parsedExec = parseExec(rawExec);
+      if (!parsedExec || typeof parsedExec.command !== "string" || !parsedExec.command.trim()) {
+        return new Response(JSON.stringify({ error: "Invalid start command" }), { status: 400, headers: { "Content-Type": "application/json" } });
+      }
+      body.exec = JSON.stringify({
+        ...parsedExec,
+        type: ["java", "bedrock", "custom"].includes(parsedExec.type) ? parsedExec.type : "custom",
+        command: parsedExec.command.trim(),
+        args: Array.isArray(parsedExec.args) ? parsedExec.args.map((a) => String(a)) : [],
+      });
+    }
+    const allowedFields = ["name", "loader", "loader_version", "loader_build", "loader_channel", "java_version", "jar", "memory_min", "memory_max", "jvm_args", "port", "motd", "auto_start", "backup_limit", "backup_on_stop", "backup_on_update", "backup_on_loader", "backup_auto_prune", "exec"];
     const fields = [], vals = [];
     for (const [k, v] of Object.entries(body)) {
       if (!allowedFields.includes(k)) continue;
@@ -2321,6 +2350,7 @@ export const loadersRoute = new Elysia({ prefix: "/api/loaders" })
 
 // ============ JAVA ============
 export const javaRoute = new Elysia({ prefix: "/api/java" })
+  .get("/installed", () => ({ installed: listInstalledJava(JAVA_DIR), javaDir: JAVA_DIR }))
   .get("/", async () => {
     const [detected, installed] = await Promise.all([
       detectJava(JAVA_DIR).catch(() => []),
@@ -2942,8 +2972,11 @@ function resolveUpdateChannel(explicit) {
   return normalizeChannel(stored || defaultChannel());
 }
 
-// Console page served while a self-update runs: polls /api/updates/log, which
-// the detached updater and the relaunched panel append to.
+// Progress page served while a self-update runs. It shows nothing but a
+// loading bar: the panel closes, swaps the files and restarts, so the only
+// thing the user needs to know is when to go back to the panel and reload.
+// It polls /api/updates/log (written by the detached updater and the relaunched
+// panel) to tell when the new panel is answering.
 const UPDATE_PAGE_HTML = `<!doctype html>
 <html lang="en">
 <head>
@@ -2953,59 +2986,80 @@ const UPDATE_PAGE_HTML = `<!doctype html>
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
-  body { margin: 0; background: #0d1117; color: #e6edf3; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-  .wrap { max-width: 980px; margin: 0 auto; padding: 24px 16px 48px; }
-  header { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
-  header h1 { font-size: 1rem; margin: 0; font-weight: 700; letter-spacing: 0.02em; }
-  .dot { width: 9px; height: 9px; border-radius: 50%; background: #3fb950; box-shadow: 0 0 8px #3fb950; }
-  .badge { font-size: 0.7rem; padding: 3px 9px; border-radius: 999px; border: 1px solid #30363d; color: #8b949e; }
-  .badge.ok { color: #3fb950; border-color: #238636; }
-  .badge.warn { color: #d29922; border-color: #9e6a03; }
-  pre { margin: 0; padding: 14px; background: #010409; border: 1px solid #30363d; border-radius: 10px; height: 62vh; overflow: auto; font-size: 0.78rem; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
-  footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; color: #8b949e; font-size: 0.72rem; flex-wrap: wrap; }
-  button { background: #21262d; color: #e6edf3; border: 1px solid #30363d; border-radius: 6px; padding: 5px 12px; font: inherit; font-size: 0.72rem; cursor: pointer; }
-  button:hover { border-color: #8b949e; }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px; background: #0d1117; color: #e6edf3; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .card { width: 100%; max-width: 460px; padding: 22px; background: #161b22; border: 1px solid #30363d; border-radius: 14px; }
+  h1 { margin: 0 0 6px; font-size: 1rem; font-weight: 700; }
+  .track { position: relative; height: 8px; margin: 18px 0 14px; background: #010409; border: 1px solid #30363d; border-radius: 999px; overflow: hidden; }
+  .bar { position: absolute; top: 0; bottom: 0; width: 35%; border-radius: 999px; background: linear-gradient(90deg, #1f6feb, #58a6ff); animation: slide 1.4s ease-in-out infinite; transition: width 0.35s ease; }
+  .track.done .bar { left: 0; width: 100%; animation: none; background: #3fb950; }
+  .track.failed .bar { left: 0; width: 100%; animation: none; background: #f85149; }
+  @keyframes slide { 0% { left: -35%; } 100% { left: 100%; } }
+  .status { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; font-weight: 600; }
+  .status.done { color: #3fb950; }
+  .status.failed { color: #f85149; }
+  .hint { margin: 8px 0 0; color: #8b949e; font-size: 0.82rem; line-height: 1.5; }
+  .hint[hidden] { display: none; }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <header><span class="dot"></span><h1>SMP update</h1><span id="status" class="badge">connecting…</span></header>
-  <pre id="log">Waiting for the updater…</pre>
-  <footer><span>The panel closes, swaps the files and restarts. This page follows the updater log.</span><button onclick="location.reload()">Reload</button></footer>
-</div>
+  <div class="card">
+    <h1 id="title">Updating SMP</h1>
+    <div class="track" id="track" role="progressbar" aria-label="Update progress"><div class="bar"></div></div>
+    <div class="status" id="status">Loading…</div>
+    <p class="hint" id="hint" hidden></p>
+  </div>
 <script>
-  const pre = document.getElementById("log");
+  const title = document.getElementById("title");
+  const track = document.getElementById("track");
   const status = document.getElementById("status");
-  let lastLength = 0;
-  let done = false;
+  const hint = document.getElementById("hint");
+  // Only lines written after this page opened belong to this update; older
+  // updates left "panel relaunched" entries in the same log file.
+  const pageStart = Date.now() - 10000;
+  let finished = false;
+
+  function finish(kind) {
+    if (finished) return;
+    finished = true;
+    track.className = "track " + kind;
+    if (kind === "done") {
+      title.textContent = "Update complete";
+      status.className = "status done";
+      status.textContent = "Done";
+      hint.hidden = false;
+      hint.textContent = "Go back to the panel tab and reload the page.";
+    } else {
+      title.textContent = "Update failed";
+      status.className = "status failed";
+      status.textContent = "The panel did not come back up";
+      hint.hidden = false;
+      hint.textContent = "Start the panel again from the terminal. The updater log is update.log in your SMP data folder.";
+    }
+  }
+
+  function outcome(text) {
+    const lines = text.split("\\n");
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i];
+      const at = Date.parse((line.match(/^\\[([^\\]]+)\\]/) || [])[1] || "");
+      if (!Number.isFinite(at) || at < pageStart) continue;
+      if (/updater: panel relaunched/.test(line)) return "done";
+      if (/updater: (relaunch FAILED|the panel did not exit)/.test(line)) return "failed";
+    }
+    return null;
+  }
 
   async function poll() {
+    if (finished) return;
     try {
       const res = await fetch("/api/updates/log", { cache: "no-store" });
       if (!res.ok) throw new Error(String(res.status));
-      const text = await res.text();
-      status.textContent = done ? "update complete" : "live";
-      status.className = "badge ok";
-      if (text.length !== lastLength) {
-        const atBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 40;
-        pre.textContent = text || "Waiting for the updater…";
-        if (atBottom) pre.scrollTop = pre.scrollHeight;
-        lastLength = text.length;
-      }
-      if (!done && /updater: panel relaunched/.test(text)) {
-        done = true;
-        status.textContent = "update complete — waiting for the panel…";
-      }
-      if (done) {
-        // The page is served by the panel, so a successful log fetch means the
-        // new panel is live: head back to the app.
-        status.textContent = "update complete — reloading…";
-        setTimeout(() => { location.href = "/"; }, 2500);
-        return;
-      }
+      const kind = outcome(await res.text());
+      if (kind) return finish(kind);
+      status.textContent = "Loading…";
     } catch {
-      status.textContent = done ? "update complete — starting panel…" : "panel restarting…";
-      status.className = "badge warn";
+      // The panel is closed while the files are swapped.
+      status.textContent = "Loading…";
     }
     setTimeout(poll, 1000);
   }

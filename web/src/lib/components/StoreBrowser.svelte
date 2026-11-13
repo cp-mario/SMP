@@ -28,6 +28,7 @@
     type = $bindable("mod"),
     loader = $bindable(""),
     gameVersion = $bindable(""),
+    systemInfo = null,
     allowInstall = true,
     compact = false,
     onInstalled = undefined,
@@ -78,6 +79,7 @@
   let packMemory = $state(2048);
   let packBusy = $state(false);
   let packError = $state("");
+  const maxRamMb = $derived(Math.max(1024, Math.floor(Number(systemInfo?.memory?.maxMb || systemInfo?.totalRamMb || 8192))));
 
   let targetServer = $derived((servers || []).find((s) => s.id === targetServerId) || null);
   // The destination server decides install compatibility; the toolbar loader/version only
@@ -489,7 +491,7 @@
   function openPackCreate() {
     if (!detailsProject) return;
     packName = `${detailsProject.title || "Modpack"} SMP`;
-    packMemory = 4096;
+    packMemory = Math.min(4096, maxRamMb);
     packError = "";
     packOpen = true;
   }
@@ -807,8 +809,8 @@
       <TextField bind:value={packName} label="Server name" placeholder="My modpack server" disabled={packBusy} autofocus />
       <div class="field-block">
         <span class="label">Memory</span>
-        <input class="range" type="range" min="1024" max="16384" step="512" bind:value={packMemory} />
-        <div class="muted">{(packMemory / 1024).toFixed(0)} GB</div>
+        <input class="range" type="range" min="1024" max={maxRamMb} step="512" bind:value={packMemory} />
+        <div class="muted">{(packMemory / 1024).toFixed(1)} GB of {(maxRamMb / 1024).toFixed(1)} GB</div>
       </div>
       <div class="muted pack-summary">
         Source: <b>{sourceName(source)}</b>{detailsProject?.game_versions?.length ? ` · ${detailsProject.game_versions.slice(0, 4).join(", ")}` : ""}

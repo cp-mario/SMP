@@ -18,6 +18,7 @@
 
   let {
     open = $bindable(false),
+    systemInfo = null,
     onclose = undefined,
     oncreated = undefined,
     onopenblank = undefined,
@@ -67,6 +68,7 @@
   let jvmArgs = $state("");
   let busy = $state(false);
   let formError = $state("");
+  const maxRamMb = $derived(Math.max(256, Math.floor(Number(systemInfo?.memory?.maxMb || systemInfo?.totalRamMb || 8192))));
 
   let nameTouched = $state(false);
 
@@ -307,6 +309,7 @@
           <MemoryJvmInput
             bind:valueMb={memoryMb}
             bind:jvmArgs
+            maxMb={maxRamMb}
           />
           <div class="summary muted">
             {#if selectedPack}

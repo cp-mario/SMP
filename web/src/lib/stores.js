@@ -41,6 +41,31 @@ export async function loadMinecraftVersions() {
   return [...new Set(versions)];
 }
 
+/**
+ * Managed runtimes offered by the panel. This index is fixed, so the settings
+ * grid renders on first paint; only the installed flags come from the server.
+ */
+export const MANAGED_JAVA_VERSIONS = [
+  { id: "8", major: 8, name: "Java 8 (LTS)", lts: true },
+  { id: "11", major: 11, name: "Java 11 (LTS)", lts: true },
+  { id: "17", major: 17, name: "Java 17 (LTS)", lts: true },
+  { id: "21", major: 21, name: "Java 21 (LTS)", lts: true },
+  { id: "22", major: 22, name: "Java 22", lts: false },
+  { id: "23", major: 23, name: "Java 23", lts: false },
+  { id: "24", major: 24, name: "Java 24", lts: false },
+  { id: "25", major: 25, name: "Java 25 (LTS)", lts: true },
+];
+
+export async function loadJavaInstalled() {
+  const data = await api("/java/installed");
+  const installed = data.installed || [];
+  return {
+    installed,
+    installedIds: installed.map((j) => String(j.id)),
+    javaDir: data.javaDir || "",
+  };
+}
+
 export async function loadJava() {
   try {
     const data = await api("/java");

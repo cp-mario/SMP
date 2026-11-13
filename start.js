@@ -143,7 +143,10 @@ async function askChoice(port, probe) {
 
   if (process.env.SMP_SKIP_BUILD !== "1") {
     console.log("Building web app...");
-    const buildCode = await run(bunCommand(), ["--bun", "run", "build"], webDir, "web-build");
+    // Run the Vite+ CLI with Bun directly. `bun --bun run build` still resolved
+    // the package script to the Node shim on Windows, so invoke the JS entry.
+    const vpBin = path.join(webDir, "node_modules", "vite-plus", "dist", "bin.js");
+    const buildCode = await run(bunCommand(), [vpBin, "build"], webDir, "web-build");
     if (buildCode !== 0) { console.error("Web build failed; aborting."); process.exit(buildCode); }
   } else {
     console.log("Skipping web build (SMP_SKIP_BUILD=1).");

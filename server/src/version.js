@@ -61,7 +61,7 @@ export const CHANNELS = ["stable", "experimental"];
 export const CHANNEL_LABELS = { stable: "Stable", experimental: "Experimental" };
 export const CHANNEL_HINTS = {
   stable: "Only final releases. Recommended for everyday use.",
-  experimental: "Pre-releases included: new builds arrive first, but may be unstable.",
+  experimental: "Pre-releases included: new builds arrive first, but may be unstable. ",
 };
 
 /** Accepts `experimental`, `exp`, `true`… and falls back to `stable`. */

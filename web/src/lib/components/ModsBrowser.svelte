@@ -9,6 +9,7 @@
 
   let targetServerId = $state("");
   let servers = $derived(appState?.servers || []);
+  let systemInfo = $derived(appState?.systemInfo || null);
   let targetServer = $derived(servers.find((s) => s.id === targetServerId) || null);
 
   $effect(() => {
@@ -34,6 +35,7 @@
 
 <StoreBrowser
   {servers}
+  {systemInfo}
   bind:targetServerId
   onInstalled={() => {}}
   onCreated={(id) => { onServerCreated?.(); router.navigate(`/server/${id}`); }}

@@ -80,18 +80,21 @@
   let loaderMeta = $derived((loaders || []).find((l) => l.id === selectedLoader) || null);
   let supportsJvm = $derived(loaderMeta?.java === true);
   let showJvmPanel = $derived(!!loaderMeta && loaderMeta.type !== "bedrock" && loaderMeta.type !== "native" && !loaderMeta.custom);
+  let isCustomLoader = $derived(loaderMeta?.custom === true);
   let needsVersion = $derived(loaderMeta?.custom !== true);
+  let needsPorts = $derived(!isCustomLoader);
   let portRoles = $derived(loaderMeta?.ports || []);
   let portsInRange = $derived(portRoles.every((p) => {
     const n = Number(portValues[p.role]);
     return Number.isInteger(n) && n >= 1 && n <= 65535;
   }));
-  let portsValid = $derived(portsInRange && portsChecked && !portsChecking && !portsBusy && !Object.values(portErrors).some(Boolean));
+  let portsValid = $derived(isCustomLoader || (portsInRange && portsChecked && !portsChecking && !portsBusy && !Object.values(portErrors).some(Boolean)));
   let canCreate = $derived(!!selectedLoader && !!createName?.trim() && !createLoading && (!needsVersion || !!selectedVersion) && (!loaderBuildsSupported || !!selectedLoaderBuild || loaderBuildsLoading) && portsValid);
   let maxRamMb = $derived(Number(systemInfo?.memory?.maxMb || systemInfo?.totalRamMb || 8192));
   let selectedJavaName = $derived((javaRuntimes || []).find((j) => j.id === selectedJava)?.name || (selectedJava ? String(selectedJava) : "Auto"));
 
   $effect(() => {
+    if (!needsPorts) return;
     const key = `${selectedLoader || ""}:${(loaderMeta?.ports || []).map((p) => p.role).join(",")}`;
     if (key === portsLoaderKey) return;
     portsLoaderKey = key;
@@ -103,7 +106,7 @@
   // Check every displayed port against both the panel's reservations and the OS.
   // A port is only accepted once the API confirms it can be bound right now.
   $effect(() => {
-    if (!selectedLoader || !portRoles.length) {
+    if (!needsPorts || !selectedLoader || !portRoles.length) {
       portCheckSeq++;
       portCheckKey = null;
       portErrors = {};
@@ -200,6 +203,8 @@
   }
 
   function requestedPorts() {
+    // Custom loaders do not ask for ports: the backend allocates a free set.
+    if (isCustomLoader) return {};
     // Send every chosen port explicitly: the backend must reject a conflict
     // instead of silently moving a port after the UI has validated it.
     const out = {};
@@ -299,7 +304,7 @@
           {/if}
         </section>
 
-        {#if selectedLoader}
+        {#if selectedLoader && !loaderMeta?.custom}
           <section class="form-section">
             <div class="section-head">
               <span class="step-badge">P</span>
@@ -399,16 +404,9 @@
             </div>
           {/if}
         {:else}
-          <section class="form-section">
-            <div class="section-head">
-              <span class="step-badge">3</span>
-              <div>
-                <div class="section-title">Versión / etiqueta (opcional)</div>
-                <div class="section-sub">Identifica la build que vas a usar.</div>
-              </div>
-            </div>
-            <TextField value={selectedVersion || ""} placeholder="personalizado" onchange={(e) => onSelectVersion?.(e.currentTarget.value)} />
-          </section>
+          <Alert tone="info" title="Loader personalizado">
+            No hace falta elegir versión ni puertos. Crea el servidor y después sube tus archivos, ajusta el comando de inicio y añade los puertos, mods y ajustes que quieras desde la página del servidor.
+          </Alert>
         {/if}
 
         {#if !loaderMeta?.custom && (loaderBuildsSupported || loaderBuildsLoading)}
@@ -504,7 +502,9 @@
         <div class="summary-list">
           <div class="summary-row"><span>Nombre</span><b>{createName?.trim() || "—"}</b></div>
           <div class="summary-row"><span>Loader</span><b>{loaderMeta?.name || "—"}</b></div>
-          <div class="summary-row"><span>Versión</span><b>{selectedVersion || "—"}</b></div>
+          {#if !isCustomLoader}
+            <div class="summary-row"><span>Versión</span><b>{selectedVersion || "—"}</b></div>
+          {/if}
           {#if loaderBuildsSupported}
             <div class="summary-row"><span>Build</span><b>{selectedLoaderBuild || "—"}</b></div>
           {/if}
