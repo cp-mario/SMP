@@ -110,7 +110,14 @@ async function askChoice(port, probe) {
 (async () => {
   console.log("Starting SMP...");
   let port = DEFAULT_PORT;
-  const probe = await probePanel(port);
+  let probe = await probePanel(port);
+  // The self-updater relaunches the panel right after the old process exits:
+  // there is no terminal to answer the prompt, so wait for the port instead.
+  if (probe.up && process.env.SMP_UPDATE_RELAUNCH === "1") {
+    console.log(`Waiting for port ${port} to be released by the previous instance...`);
+    for (let i = 0; i < 120 && !(await isPortFree(port)); i++) await new Promise(r => setTimeout(r, 500));
+    probe = await probePanel(port);
+  }
   if (probe.up) {
     const choice = await askChoice(port, probe);
     if (choice === "2") { console.log("Cancelled."); process.exit(0); }

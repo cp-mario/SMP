@@ -417,6 +417,26 @@ function releaseForVersion(version) {
 }
 
 /**
+ * Removes stage folders left behind by an update that failed (or whose panel
+ * died before the updater could swap the files). A stage is only dropped once
+ * the panel process that created it is gone.
+ */
+function cleanupStaleStages() {
+  let names = [];
+  try { names = readdirSync(ROOT_DIR); } catch { return; }
+  for (const name of names) {
+    const m = /^\.update-(\d+)-\d+$/.exec(name);
+    if (!m) continue;
+    const owner = Number(m[1]);
+    if (owner === process.pid) continue;
+    let alive = false;
+    try { process.kill(owner, 0); alive = true; } catch { alive = false; }
+    if (alive) continue;
+    try { rmSync(join(ROOT_DIR, name), { recursive: true, force: true }); } catch { /* removed on the next update */ }
+  }
+}
+
+/**
  * Detached updater: waits for the panel process to exit, moves the old
  * installation into a trash folder (same volume => instant rename), moves the
  * staged tree in its place, drops the trash and relaunches the launcher.
@@ -432,6 +452,7 @@ import { homedir } from "os";
 
 const [, , pidArg, stageDir, installDir, entry] = process.argv;
 const pid = Number(pidArg);
+const port = Number(process.env.SMP_PORT || process.env.PORT || 3001);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const logPath = join(process.env.SMP_DATA_DIR || join(homedir(), ".smp"), "update.log");
 const log = (msg) => { try { appendFileSync(logPath, "[" + new Date().toISOString() + "] " + msg + "\\n"); } catch {} };
@@ -445,52 +466,93 @@ async function waitExit(p, timeoutMs) {
   return false;
 }
 
+/** True once the relaunched panel answers its health check. */
+async function panelIsUp() {
+  try {
+    const res = await fetch("http://127.0.0.1:" + port + "/api/health", { signal: AbortSignal.timeout(1500) });
+    if (!res.ok) return false;
+    const info = await res.json().catch(() => null);
+    return Boolean(info && info.service === "smp");
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Waits for the panel to answer. The launcher installs dependencies and builds
+ * the web app first, so this can take a while; it only gives up early when the
+ * launcher died without ever starting the panel.
+ */
+async function waitPanel(timeoutMs, child) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (await panelIsUp()) return true;
+    if (child && child.exitCode !== null && child.exitCode !== 0) return false;
+    await sleep(1000);
+  }
+  return false;
+}
+
+/** Starts the launcher again, detached from this helper, in the new tree. */
 function relaunch() {
-  return new Promise((resolve) => {
-    let out = "ignore";
-    try { mkdirSync(dirname(logPath), { recursive: true }); out = openSync(logPath, "a"); } catch {}
-    let child;
-    try {
-      child = spawn(process.execPath, ["run", entry], { cwd: installDir, detached: true, stdio: ["ignore", out, out], env: process.env });
-    } catch (e) {
-      log("relaunch: spawn failed: " + e.message);
-      resolve(false);
-      return;
-    }
+  let out = "ignore";
+  try { mkdirSync(dirname(logPath), { recursive: true }); out = openSync(logPath, "a"); } catch {}
+  try {
+    const child = spawn(process.execPath, [entry], {
+      cwd: installDir,
+      detached: true,
+      stdio: ["ignore", out, out],
+      env: { ...process.env, SMP_PORT: String(port), PORT: String(port), SMP_UPDATE_RELAUNCH: "1" },
+    });
     child.on("error", (e) => log("relaunch: error: " + e.message));
-    child.on("exit", (code) => log("relaunch: panel exited with code " + code));
+    child.on("exit", (code) => log("relaunch: launcher exited with code " + code));
     child.unref();
-    setTimeout(() => resolve(child.exitCode === null), 5000);
-  });
+    return child;
+  } catch (e) {
+    log("relaunch: spawn failed: " + e.message);
+    return null;
+  }
 }
 
 if (!pid || !stageDir || !installDir) process.exit(1);
-log("updater started: pid=" + pid + " stage=" + stageDir);
-if (!(await waitExit(pid, 120000))) { log("updater: the panel did not exit"); process.exit(1); }
+log("updater started: pid=" + pid + " stage=" + stageDir + " install=" + installDir);
+if (!(await waitExit(pid, 120000))) { log("updater: the panel did not exit; nothing was changed"); process.exit(1); }
 log("updater: panel exited");
 await sleep(1000);
 
 const stageBase = basename(stageDir);
 const tree = join(stageDir, "tree");
 const trash = join(stageDir, "trash");
+if (!existsSync(tree)) { log("updater: no staged tree in " + stageDir + "; nothing was changed"); process.exit(1); }
 mkdirSync(trash, { recursive: true });
 
+// Move the old installation aside, then the new one in. A single entry that
+// cannot be moved must not abort the swap half-way.
+let failing = 0;
 for (const name of readdirSync(installDir)) {
   if (name === stageBase) continue;
-  try { renameSync(join(installDir, name), join(trash, name)); } catch (e) { log("updater: skip " + name + ": " + e.message); }
+  try { renameSync(join(installDir, name), join(trash, name)); } catch (e) { failing++; log("updater: could not set aside " + name + ": " + e.message); }
 }
 
 for (const name of readdirSync(tree)) {
-  renameSync(join(tree, name), join(installDir, name));
+  try { renameSync(join(tree, name), join(installDir, name)); } catch (e) { failing++; log("updater: could not install " + name + ": " + e.message); }
 }
+
+log("updater: files swapped" + (failing ? " (" + failing + " entries failed, see above)" : ""));
 
 rmSync(trash, { recursive: true, force: true });
 rmSync(stageDir, { recursive: true, force: true });
-log("updater: files swapped");
+log("updater: discarded " + stageBase);
 
-let up = await relaunch();
-if (!up) { await sleep(1000); up = await relaunch(); }
-log("updater: " + (up ? "panel relaunched" : "relaunch FAILED"));
+let child = relaunch();
+let up = child ? await waitPanel(150000, child) : false;
+if (!up && child && child.exitCode !== null) {
+  log("updater: the launcher exited without starting the panel; launching it again");
+  await sleep(1000);
+  child = relaunch();
+  up = child ? await waitPanel(150000, child) : false;
+}
+log("updater: " + (up ? "panel relaunched (http://localhost:" + port + ")" : "relaunch FAILED"));
 if (!up) process.exit(1);
 `;
 
@@ -592,15 +654,22 @@ export async function applyUpdate({ target = "", current = "", channel = "stable
       };
     }
 
+    cleanupStaleStages();
     const stage = join(ROOT_DIR, `.update-${process.pid}-${Date.now()}`);
     mkdirSync(stage, { recursive: true });
+    // Every failure before the detached updater takes over drops the stage, so
+    // no `.update-*` folder is left behind in the installation directory.
+    const stageFail = (id, code, message) => {
+      try { rmSync(stage, { recursive: true, force: true }); } catch { /* removed by cleanupStaleStages */ }
+      return fail(steps, id, code, message);
+    };
     try {
       const archivePath = join(stage, "source");
       let downloaded;
       try {
         downloaded = await downloadSource(version, archivePath);
       } catch (e) {
-        return fail(steps, "download", e?.status === 404 ? "NO_SOURCE" : "DOWNLOAD_FAILED", `Could not download the ${version} source archive: ${e?.message || e}`);
+        return stageFail("download", e?.status === 404 ? "NO_SOURCE" : "DOWNLOAD_FAILED", `Could not download the ${version} source archive: ${e?.message || e}`);
       }
       setStep(steps, "download", "done");
 
@@ -624,6 +693,9 @@ export async function applyUpdate({ target = "", current = "", channel = "stable
       const unpacked = join(stage, "unpacked");
       let srcRoot = unpacked;
       try {
+        // `tar` extracts relative to an existing cwd (ENOENT otherwise), and
+        // the zip path expects the folder to be there as well.
+        mkdirSync(unpacked, { recursive: true });
         if (downloaded.ext === "zip") {
           new AdmZip(archivePath).extractAllTo(unpacked, true);
           // GitHub zips wrap the tree in a SMP-<version> folder.
@@ -635,11 +707,11 @@ export async function applyUpdate({ target = "", current = "", channel = "stable
           await untar({ file: archivePath, cwd: unpacked, strip: 1 });
         }
       } catch (e) {
-        return fail(steps, "install", "EXTRACT_FAILED", `Could not unpack the source archive: ${e?.message || e}`);
+        return stageFail("install", "EXTRACT_FAILED", `Could not unpack the source archive: ${e?.message || e}`);
       }
 
       if (!existsSync(join(srcRoot, "package.json"))) {
-        return fail(steps, "install", "NO_SOURCE", "The archive does not look like an SMP source tree.");
+        return stageFail("install", "NO_SOURCE", "The archive does not look like an SMP source tree.");
       }
 
       // Build the new tree inside the stage (same volume => instant renames),
@@ -661,7 +733,7 @@ export async function applyUpdate({ target = "", current = "", channel = "stable
       try {
         spawnUpdater({ stage, installDir: ROOT_DIR, entry, pid: process.pid });
       } catch (e) {
-        return fail(steps, "install", "SPAWN_FAILED", `Could not start the updater: ${e?.message || e}`);
+        return stageFail("install", "SPAWN_FAILED", `Could not start the updater: ${e?.message || e}`);
       }
       setStep(steps, "install", "done");
       setStep(steps, "restart", "done");

@@ -107,6 +107,8 @@
         // and restarts (bun install + web build included).
         window.open("/update", "_blank");
         toasts.success(`Updated to ${latest}. The panel is restarting…`);
+      } else if (res?.code === "UP_TO_DATE") {
+        toasts.success(`Already up to date (${res.version || current}).`);
       } else if (res?.code === "NOT_CONFIGURED") {
         toasts.warning("Self-update is not wired up yet");
       } else {

@@ -29,7 +29,7 @@ function bunCommand() {
 }
 
 const __dirname = dirnameOf(import.meta.url);
-const ROOT = resolve(__dirname, "../../..");
+const ROOT = resolve(__dirname, "../..");
 const SERVER_ENTRY = join(ROOT, "server/src/index.js");
 const DEFAULT_PORT = Number(process.env.SMP_PORT || process.env.PORT || 3001);
 const BIN_DIR = process.platform === "win32"
@@ -137,13 +137,20 @@ async function main() {
           const result = await applyUpdate({ target: rel.version, current, channel });
           for (const step of result.steps || []) console.log(`  [${step.status}] ${step.label}`);
           if (!result.ok) {
-            console.error(`Update failed: ${result.message}`);
-            process.exitCode = 1;
+            if (result.code === "UP_TO_DATE") {
+              console.log(`Already up to date (${current}).`);
+              console.log(`Refresh the panel to load it: http://localhost:${DEFAULT_PORT}/update`);
+            } else {
+              console.error(`Update failed: ${result.message}`);
+              process.exitCode = 1;
+            }
           } else {
             console.log(result.message);
+            console.log(`Refresh the panel to load the new version: http://localhost:${DEFAULT_PORT}/update`);
           }
         } else {
-          console.log("You are up to date.");
+          console.log(`Already up to date (${current}).`);
+          console.log(`Refresh the panel to load the installed version: http://localhost:${DEFAULT_PORT}/update`);
         }
         if (!rel.url && RELEASES_FEED) console.log(`Releases:  ${RELEASES_FEED}`);
       } catch (e) {
