@@ -1,5 +1,5 @@
 <script>
-  import { saveSettings, loadSettings, loadJava, installJavaVersion, uninstallJavaVersion } from "../stores.js";
+  import { saveSettings, loadSettings, loadJava, installJavaVersion, uninstallJavaVersion, loadPanelPaths, wipePanelData } from "../stores.js";
   import { toasts } from "../toast.js";
   import Panel from "./ui/Panel.svelte";
   import Button from "./ui/Button.svelte";
@@ -13,7 +13,7 @@
   import Icon from "./ui/Icon.svelte";
   import UpdatesPanel from "./UpdatesPanel.svelte";
 
-  let { appState, onJavaChanged, onAccent, onUpdateStateChanged } = $props();
+  let { appState, onJavaChanged, onServersChanged, onAccent, onUpdateStateChanged } = $props();
 
   let settings = $state(/** @type {Record<string, any>} */ ({}));
   let curseforgeKey = $state("");
@@ -27,6 +27,56 @@
   let javaError = $state("");
   let removeTarget = $state(null);
   let showRemoveDialog = $state(false);
+
+  // Danger zone: permanent deletion of server data and/or the panel install.
+  const WIPE_OPTIONS = [
+    {
+      id: "servers",
+      title: "All servers",
+      description: "Every server, world, mod, backup and the panel database. The panel's Java runtimes are kept. Running servers are stopped first; the panel keeps running and recreates the empty servers folder.",
+      pathKeys: ["serversDir"],
+      phrase: "DELETE SERVERS",
+      closes: false,
+    },
+    {
+      id: "java",
+      title: "Panel Java runtimes",
+      description: "Only the Java versions downloaded by the panel. Running servers are stopped first; server files are kept.",
+      pathKeys: ["javaDir"],
+      phrase: "DELETE JAVA",
+      closes: false,
+    },
+    {
+      id: "panel",
+      title: "The panel",
+      description: "The SMP installation folder. Server data is kept.",
+      pathKeys: ["installDir"],
+      phrase: "DELETE PANEL",
+      closes: true,
+    },
+    {
+      id: "all",
+      title: "Everything",
+      description: "All servers, the panel's Java runtimes and the panel installation.",
+      pathKeys: ["dataDir", "installDir"],
+      phrase: "DELETE EVERYTHING",
+      closes: true,
+    },
+  ];
+  let panelPaths = $state({ dataDir: "", serversDir: "", javaDir: "", installDir: "" });
+  let wipeScope = $state("servers");
+  let wipeFirstOpen = $state(false);
+  let wipeFinalOpen = $state(false);
+  let wiping = $state(false);
+  let wipeDone = $state("");
+  let wipeInfo = $state("");
+  let wipeError = $state("");
+
+  const selectedWipe = $derived(WIPE_OPTIONS.find((o) => o.id === wipeScope) || WIPE_OPTIONS[0]);
+  function optionPaths(option) {
+    return (option.pathKeys || []).map((k) => panelPaths[k]).filter(Boolean);
+  }
+  const wipeTargetText = $derived(optionPaths(selectedWipe).join(" and "));
 
   function shortJavaVersion(v) {
     if (!v) return "";
@@ -50,6 +100,7 @@
     } catch (e) {
       loadError = e?.message || String(e);
     }
+    loadPanelPaths().then((p) => { panelPaths = p; }).catch(() => { /* paths stay empty */ });
     await refreshJava();
   }
 
@@ -101,6 +152,9 @@
     } finally {
       javaBusy = "";
       removeTarget = null;
+      // The uninstall removes the card, so leaving the dialog open would show it
+      // empty and force a second click to dismiss it.
+      showRemoveDialog = false;
     }
   }
 
@@ -124,6 +178,47 @@
     // App applies the CSS variables, persists to localStorage and saves to the
     // backend (debounced), so this component only reports the intent.
     onAccent?.(color);
+  }
+
+  function openWipe() {
+    if (wiping) return;
+    wipeError = "";
+    wipeInfo = "";
+    wipeFirstOpen = true;
+  }
+  function continueWipe() {
+    wipeFirstOpen = false;
+    wipeFinalOpen = true;
+  }
+  function closeWipe() {
+    if (wiping) return;
+    wipeFirstOpen = false;
+    wipeFinalOpen = false;
+  }
+  async function handleWipe() {
+    if (wiping) return;
+    wiping = true;
+    wipeError = "";
+    wipeInfo = "";
+    try {
+      const res = await wipePanelData(selectedWipe.id, selectedWipe.phrase);
+      wipeFinalOpen = false;
+      if (res?.closing === false) {
+        wipeInfo = res.message || "Deleted. The panel is still running.";
+        toasts.success("Deleted");
+        if (selectedWipe.id === "servers") onServersChanged?.();
+        await refreshJava();
+      } else {
+        wipeDone = selectedWipe.id;
+        toasts.success("Deletion started");
+      }
+    } catch (e) {
+      wipeError = e?.message || String(e);
+      wipeFinalOpen = false;
+      toasts.error("Could not delete", e);
+    } finally {
+      wiping = false;
+    }
   }
 
   load();
@@ -264,6 +359,40 @@
 </div>
 
 <UpdatesPanel updateState={appState?.updateState || null} {onUpdateStateChanged} />
+
+<Panel title="Danger zone" icon="alert" subtitle="Permanently delete servers or the panel">
+  {#if wipeDone}
+    <Alert tone="success" title={wipeDone === "panel" ? "Panel deleted" : "Everything deleted"}>
+      {wipeDone === "panel" ? "The panel has been deleted. See you soon!" : "The panel and all servers have been deleted. See you soon!"}
+    </Alert>
+  {:else}
+    <div class="wipe-options" role="radiogroup" aria-label="What to delete">
+      {#each WIPE_OPTIONS as option}
+        <button
+          type="button"
+          role="radio"
+          aria-checked={wipeScope === option.id}
+          class="wipe-option"
+          class:selected={wipeScope === option.id}
+          onclick={() => (wipeScope = option.id)}
+        >
+          <span class="wipe-dot" aria-hidden="true"></span>
+          <span class="wipe-copy">
+            <span class="wipe-title">{option.title}</span>
+            <span class="wipe-desc">{option.description}</span>
+            <code class="wipe-path">{optionPaths(option).join(" · ") || "…"}</code>
+          </span>
+        </button>
+      {/each}
+    </div>
+    {#if wipeInfo}<Alert tone="success">{wipeInfo}</Alert>{/if}
+    {#if wipeError}<Alert tone="danger">{wipeError}</Alert>{/if}
+    <div class="wipe-foot">
+      <span class="wipe-hint">Asks twice and requires typing the confirmation phrase. It cannot be undone.</span>
+      <Button variant="danger" size="sm" onclick={openWipe}><Icon name="trash" size={13} /> Delete…</Button>
+    </div>
+  {/if}
+</Panel>
 </div>
 
 <ConfirmDialog
@@ -275,6 +404,29 @@
   busy={!!javaBusy}
   onconfirm={() => removeTarget && handleUninstall(removeTarget)}
   oncancel={closeRemoveDialog}
+/>
+
+<ConfirmDialog
+  bind:open={wipeFirstOpen}
+  title={`Delete ${selectedWipe.title.toLowerCase()}?`}
+  message={`This permanently deletes ${selectedWipe.title.toLowerCase()}${wipeTargetText ? ` (${wipeTargetText})` : ""}.${selectedWipe.closes ? " The panel closes right after and does not restart by itself." : " The panel keeps running and recreates the empty folders."}`}
+  confirmLabel="Continue"
+  tone="danger"
+  onconfirm={continueWipe}
+  oncancel={closeWipe}
+/>
+
+<ConfirmDialog
+  bind:open={wipeFinalOpen}
+  title="Final confirmation"
+  message={`Last chance: ${selectedWipe.title.toLowerCase()} will be erased from disk. Type ${selectedWipe.phrase} to continue.`}
+  confirmLabel="Delete permanently"
+  tone="danger"
+  confirmValue={selectedWipe.phrase}
+  placeholder={selectedWipe.phrase}
+  busy={wiping}
+  onconfirm={handleWipe}
+  oncancel={closeWipe}
 />
 
 <style>
@@ -413,11 +565,58 @@
   .java-sub { margin-top: 2px; font-size: 0.73rem; }
   .java-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
 
+  /* ---------- Danger zone ---------- */
+  .wipe-options { display: flex; flex-direction: column; gap: 8px; }
+  .wipe-option {
+    display: flex;
+    align-items: flex-start;
+    gap: 11px;
+    width: 100%;
+    padding: 11px 13px;
+    text-align: left;
+    background: var(--input-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: border-color var(--t-fast), background var(--t-fast);
+  }
+  .wipe-option:hover { border-color: var(--border-secondary); }
+  .wipe-option.selected {
+    border-color: var(--danger);
+    background: color-mix(in srgb, var(--input-bg) 92%, var(--danger) 8%);
+  }
+  .wipe-dot {
+    flex: 0 0 auto;
+    width: 14px;
+    height: 14px;
+    margin-top: 2px;
+    border: 1px solid var(--border-secondary);
+    border-radius: 50%;
+    box-shadow: inset 0 0 0 2px var(--input-bg);
+  }
+  .wipe-option.selected .wipe-dot { background: var(--danger); border-color: var(--danger); }
+  .wipe-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .wipe-title { color: var(--text); font-size: 0.84rem; font-weight: 600; }
+  .wipe-desc { color: var(--text-secondary); font-size: 0.75rem; line-height: 1.35; }
+  .wipe-path { color: var(--text-disabled); font-family: var(--font-mono); font-size: 0.71rem; overflow-wrap: anywhere; }
+  .wipe-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    flex-wrap: wrap;
+    margin-top: 14px;
+    padding-top: 13px;
+    border-top: 1px solid var(--border);
+  }
+  .wipe-hint { color: var(--text-secondary); font-size: 0.74rem; min-width: 0; }
+
   @media (max-width: 1100px) {
     .java-row { grid-template-columns: minmax(0, 1fr); }
   }
   @media (max-width: 620px) {
     .java-grid { grid-template-columns: minmax(0, 1fr); }
     .accent-preview { flex-direction: column; align-items: flex-start; }
+    .wipe-foot { align-items: flex-start; }
   }
 </style>

@@ -128,6 +128,28 @@ export function initDb(conn = db) {
 
 export { db };
 
+/**
+ * Wipes every table and recreates the schema, leaving the database as it looks
+ * on a fresh install. The file itself is kept: Windows keeps SQLite files
+ * mapped even after close(), so unlinking it while the panel runs fails.
+ */
+export function resetDatabase() {
+  try { db.exec("PRAGMA foreign_keys = OFF"); } catch {}
+  let tables = [];
+  try {
+    tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all();
+  } catch {}
+  for (const row of tables) {
+    const name = String(row?.name || "").replace(/"/g, '""');
+    if (!name) continue;
+    try { db.exec(`DROP TABLE IF EXISTS "${name}"`); } catch {}
+  }
+  try { db.exec("PRAGMA foreign_keys = ON"); } catch {}
+  initDb(db);
+  // Reclaim the space the deleted rows used to occupy.
+  try { db.exec("VACUUM"); } catch {}
+}
+
 export function getSetting(key, def) {
   const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key);
   return row ? row.value : def;

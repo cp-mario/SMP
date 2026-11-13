@@ -422,3 +422,19 @@ export async function applyUpdate(version, channel) {
 export async function shutdownPanel(reason = "Panel shutdown requested from the web UI") {
   return await api("/updates/shutdown", { method: "POST", body: JSON.stringify({ reason }), retries: 0, timeout: 30000 });
 }
+
+// ---------- Danger zone ----------
+
+/** Data directory (`~/.smp` by default) and the panel installation directory. */
+export async function loadPanelPaths() {
+  return await api("/panel/paths", { retries: 0 });
+}
+
+/**
+ * Deletes servers, managed Java runtimes, the panel installation or everything.
+ * `confirm` must be the exact phrase the second confirmation step asks for.
+ * Server/Java-only wipes keep the panel running; the panel install closes it.
+ */
+export async function wipePanelData(scope, confirm) {
+  return await api("/panel/wipe", { method: "POST", body: JSON.stringify({ scope, confirm }), retries: 0, timeout: 60000 });
+}

@@ -477,7 +477,7 @@
       {:else if view === "settings"}
         {#if loadedViews.settings && loadedViews.settings !== "loading"}
           {@const Settings = loadedViews.settings}
-          <Settings {appState} onJavaChanged={handleJavaChanged} onAccent={(color) => applyAccent(color)} onUpdateStateChanged={(next) => (appState.updateState = next)} />
+          <Settings {appState} onJavaChanged={handleJavaChanged} onServersChanged={() => refreshServers({ updates: false })} onAccent={(color) => applyAccent(color)} onUpdateStateChanged={(next) => (appState.updateState = next)} />
         {:else}
           <div class="boot"><div class="spinner"></div><span>Loading settings…</span></div>
         {/if}
