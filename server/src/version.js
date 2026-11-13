@@ -150,6 +150,10 @@ async function assertRepoExists() {
  *
  * experimental: every non-draft release, pre-releases included.
  * stable:       only releases published without the pre-release flag.
+ *
+ * Uses the GitHub API, which carries the prerelease flag and the release
+ * assets, and falls back to the releases Atom feed (github.com, no API rate
+ * limit) when the API answers 403 (rate limit exceeded).
  */
 export async function fetchLatestRelease({ channel = "stable" } = {}) {
   if (!REPO_CONFIGURED) {
@@ -159,6 +163,15 @@ export async function fetchLatestRelease({ channel = "stable" } = {}) {
   }
 
   const wantPrerelease = normalizeChannel(channel) === "experimental";
+  try {
+    return await fetchLatestReleaseViaApi(wantPrerelease);
+  } catch (e) {
+    if (e?.status !== 403) throw e;
+    return await fetchLatestReleaseViaFeed(wantPrerelease);
+  }
+}
+
+async function fetchLatestReleaseViaApi(wantPrerelease) {
   let release = null;
 
   try {
@@ -189,6 +202,61 @@ export async function fetchLatestRelease({ channel = "stable" } = {}) {
   }
 
   return toRelease(release);
+}
+
+/** Extracts the tag names from the releases Atom feed (newest first). */
+function parseFeedTags(xml) {
+  const tags = [];
+  for (const m of String(xml).matchAll(/<entry>[\s\S]*?<\/entry>/g)) {
+    const t = m[0].match(/<title>([^<]+)<\/title>/);
+    if (t) tags.push(t[1].trim());
+  }
+  return tags;
+}
+
+/**
+ * Rate-limit-proof fallback: the Atom feed lists every published release, and
+ * /releases/latest redirects to the newest non-prerelease release page.
+ */
+async function fetchLatestReleaseViaFeed(wantPrerelease) {
+  const noRelease = () => {
+    const err = new Error(wantPrerelease ? "No releases published yet." : "No stable release published yet.");
+    err.code = "NO_RELEASES";
+    return err;
+  };
+
+  let tag = null;
+  const res = await fetch(wantPrerelease ? `${RELEASES_FEED}.atom` : `${RELEASES_FEED}/latest`, {
+    headers: { "User-Agent": USER_AGENT },
+    signal: AbortSignal.timeout(15000),
+  });
+  if (res.status === 404) throw noRelease();
+  if (!res.ok) {
+    const err = new Error(`GitHub ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
+
+  if (wantPrerelease) {
+    tag = parseFeedTags(await res.text())[0] || null;
+  } else {
+    const title = (await res.text()).match(/<title>([^<]+)<\/title>/i)?.[1] || "";
+    tag = title.match(/v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?/)?.[0] || null;
+  }
+
+  if (!tag) throw noRelease();
+  const version = normalizeTag(tag);
+  return {
+    version,
+    name: tag,
+    isPrerelease: wantPrerelease && version.includes("-"),
+    publishedAt: null,
+    url: `${RELEASES_FEED}/tag/${tag}`,
+    notes: "",
+    assets: [],
+    configured: REPO_CONFIGURED,
+    feedUrl: RELEASES_FEED,
+  };
 }
 
 /**
@@ -330,18 +398,20 @@ function fail(steps, id, code, message, extra = {}) {
   return { ok: false, code, message, steps, ...extra };
 }
 
-/** Finds a release by its version (`0.1.2` or `v0.1.2`), or null when missing. */
-async function fetchReleaseByVersion(version) {
+/** The release record for an explicit version (no API call needed to apply it). */
+function releaseForVersion(version) {
   const bare = String(version || "").trim().replace(/^v/i, "");
-  if (!bare) return null;
-  for (const tag of [`v${bare}`, bare]) {
-    try {
-      return toRelease(await githubFetch(`${RELEASES_API}/tags/${encodeURIComponent(tag)}`));
-    } catch (e) {
-      if (e?.status !== 404) throw e;
-    }
-  }
-  return null;
+  return {
+    version: bare,
+    name: `v${bare}`,
+    isPrerelease: bare.includes("-"),
+    publishedAt: null,
+    url: `${RELEASES_FEED}/tag/v${bare}`,
+    notes: "",
+    assets: [],
+    configured: REPO_CONFIGURED,
+    feedUrl: RELEASES_FEED,
+  };
 }
 
 async function downloadFile(url, destPath) {
@@ -413,7 +483,7 @@ export async function applyUpdate({ target = "", current = "", channel = "stable
   let version = wanted.replace(/^v/i, "");
 
   try {
-    release = wanted ? await fetchReleaseByVersion(wanted) : await fetchLatestRelease({ channel });
+    release = wanted ? releaseForVersion(wanted) : await fetchLatestRelease({ channel });
     if (!release) return fail(steps, "resolve", "NO_RELEASE", `No release found for version ${wanted}.`);
     version = release.version;
     setStep(steps, "resolve", "done");
