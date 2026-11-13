@@ -26,19 +26,20 @@ $answer = (Read-Host "Channel [1/stable, default 1]").Trim().ToLowerInvariant()
 $channel = if ($answer -in @("2", "experimental", "exp", "beta", "pre")) { "experimental" } else { "stable" }
 Write-Host "Channel: $channel"
 
-# --- Resolve the latest release of the channel ---
-$repoApi = "https://api.github.com/repos/cp-mario/SMP"
+# --- Resolve the latest release of the channel (Atom feed / latest page, no API) ---
 try {
     if ($channel -eq "experimental") {
-        $release = Invoke-RestMethod "$repoApi/releases?per_page=30" | Where-Object { -not $_.draft } | Select-Object -First 1
+        $atom = (Invoke-WebRequest "https://github.com/cp-mario/SMP/releases.atom" -UseBasicParsing).Content
+        $entry = [regex]::Match($atom, "(?s)<entry>.*?</entry>").Value
+        $tag = [regex]::Match($entry, "<title>([^<]+)</title>").Groups[1].Value.Trim()
     } else {
-        $release = Invoke-RestMethod "$repoApi/releases/latest"
+        $page = (Invoke-WebRequest "https://github.com/cp-mario/SMP/releases/latest" -UseBasicParsing).Content
+        $tag = [regex]::Match($page, "<title>v?\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?</title>").Value -replace "</?title>", ""
     }
 } catch {
     throw "Could not resolve the latest $channel release from GitHub: $($_.Exception.Message)"
 }
-if (-not $release -or -not $release.tag_name) { throw "No $channel release published yet." }
-$tag = $release.tag_name
+if (-not $tag) { throw "No $channel release published yet." }
 $version = $tag -replace '^v', ''
 Write-Host "Downloading SMP $tag (source)..." -ForegroundColor Cyan
 

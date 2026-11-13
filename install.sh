@@ -25,12 +25,11 @@ case "$(printf '%s' "$CHANNEL_ANSWER" | tr '[:upper:]' '[:lower:]')" in
 esac
 echo "Channel: $CHANNEL"
 
-# --- Resolve the latest release of the channel ---
-REPO_API="https://api.github.com/repos/cp-mario/SMP"
+# --- Resolve the latest release of the channel (Atom feed / latest page, no API) ---
 if [ "$CHANNEL" = "experimental" ]; then
-  TAG="$(curl -fsSL "$REPO_API/releases?per_page=30" | grep -m1 '"tag_name"' | sed -E 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')"
+  TAG="$(curl -fsSL "https://github.com/cp-mario/SMP/releases.atom" | sed -n '/<entry>/,/<\/entry>/p' | grep -m1 -oE '<title>[^<]+</title>' | sed -E 's/.*<title>([^<]+)<\/title>.*/\1/')"
 else
-  TAG="$(curl -fsSL "$REPO_API/releases/latest" | grep -m1 '"tag_name"' | sed -E 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')"
+  TAG="$(curl -fsSL "https://github.com/cp-mario/SMP/releases/latest" | grep -m1 -oE '<title>[^<]+</title>' | sed -E 's/.*<title>([^<]+)<\/title>.*/\1/' | grep -oE 'v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?')"
 fi
 if [ -z "${TAG:-}" ]; then
   echo "Could not resolve the latest $CHANNEL release from GitHub." >&2
