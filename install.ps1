@@ -57,4 +57,4 @@ Remove-Item -Recurse -Force $tmp
 
 Write-Host ""
 Write-Host "Installed SMP $version to $installDir" -ForegroundColor Green
-Write-Host "Run the panel with: bun run \"${installDir}\start.js\"" -ForegroundColor Green
+Write-Host "Run the panel with: bun run ${installDir}\start.js\" -ForegroundColor Green

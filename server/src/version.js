@@ -421,15 +421,20 @@ function releaseForVersion(version) {
  * installation into a trash folder (same volume => instant rename), moves the
  * staged tree in its place, drops the trash and relaunches the launcher.
  * It runs from a temp directory so the installation can be wiped completely.
+ * Everything is logged to <SMP_DATA_DIR|~/.smp>/update.log, and the relaunch
+ * is verified: if the panel exits immediately it is retried once.
  */
 const UPDATER_HELPER = `
 import { spawn } from "child_process";
-import { basename, join } from "path";
-import { readdirSync, renameSync, rmSync, mkdirSync } from "fs";
+import { appendFileSync, openSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync } from "fs";
+import { basename, dirname, join } from "path";
+import { homedir } from "os";
 
 const [, , pidArg, stageDir, installDir, entry] = process.argv;
 const pid = Number(pidArg);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const logPath = join(process.env.SMP_DATA_DIR || join(homedir(), ".smp"), "update.log");
+const log = (msg) => { try { appendFileSync(logPath, "[" + new Date().toISOString() + "] " + msg + "\\n"); } catch {} };
 
 async function waitExit(p, timeoutMs) {
   const start = Date.now();
@@ -440,8 +445,29 @@ async function waitExit(p, timeoutMs) {
   return false;
 }
 
+function relaunch() {
+  return new Promise((resolve) => {
+    let out = "ignore";
+    try { mkdirSync(dirname(logPath), { recursive: true }); out = openSync(logPath, "a"); } catch {}
+    let child;
+    try {
+      child = spawn(process.execPath, ["run", entry], { cwd: installDir, detached: true, stdio: ["ignore", out, out], env: process.env });
+    } catch (e) {
+      log("relaunch: spawn failed: " + e.message);
+      resolve(false);
+      return;
+    }
+    child.on("error", (e) => log("relaunch: error: " + e.message));
+    child.on("exit", (code) => log("relaunch: panel exited with code " + code));
+    child.unref();
+    setTimeout(() => resolve(child.exitCode === null), 5000);
+  });
+}
+
 if (!pid || !stageDir || !installDir) process.exit(1);
-if (!(await waitExit(pid, 120000))) { console.error("updater: the panel did not exit"); process.exit(1); }
+log("updater started: pid=" + pid + " stage=" + stageDir);
+if (!(await waitExit(pid, 120000))) { log("updater: the panel did not exit"); process.exit(1); }
+log("updater: panel exited");
 await sleep(1000);
 
 const stageBase = basename(stageDir);
@@ -451,7 +477,7 @@ mkdirSync(trash, { recursive: true });
 
 for (const name of readdirSync(installDir)) {
   if (name === stageBase) continue;
-  try { renameSync(join(installDir, name), join(trash, name)); } catch (e) { console.error("updater: skip " + name + ": " + e.message); }
+  try { renameSync(join(installDir, name), join(trash, name)); } catch (e) { log("updater: skip " + name + ": " + e.message); }
 }
 
 for (const name of readdirSync(tree)) {
@@ -460,10 +486,12 @@ for (const name of readdirSync(tree)) {
 
 rmSync(trash, { recursive: true, force: true });
 rmSync(stageDir, { recursive: true, force: true });
+log("updater: files swapped");
 
-const child = spawn(process.execPath, ["run", entry], { cwd: installDir, detached: true, stdio: "ignore", env: process.env });
-child.unref();
-console.log("updater: update applied");
+let up = await relaunch();
+if (!up) { await sleep(1000); up = await relaunch(); }
+log("updater: " + (up ? "panel relaunched" : "relaunch FAILED"));
+if (!up) process.exit(1);
 `;
 
 /** Writes the helper to a temp dir and starts it detached for this panel PID. */
