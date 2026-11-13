@@ -27,9 +27,9 @@ echo "Channel: $CHANNEL"
 
 # --- Resolve the latest release of the channel (Atom feed / latest page, no API) ---
 if [ "$CHANNEL" = "experimental" ]; then
-  TAG="$(curl -fsSL "https://github.com/cp-mario/SMP/releases.atom" | sed -n '/<entry>/,/<\/entry>/p' | grep -m1 -oE '<title>[^<]+</title>' | sed -E 's/.*<title>([^<]+)<\/title>.*/\1/')"
+  TAG="$(curl -fsSL "https://github.com/cp-mario/SMP/releases.atom" | sed -n '/<entry>/,/<\/entry>/p' | grep -m1 -oE '<title>[^<]+</title>' | sed -E 's/.*<title>([^<]+)<\/title>.*/\1/' || true)"
 else
-  TAG="$(curl -fsSL "https://github.com/cp-mario/SMP/releases/latest" | grep -m1 -oE '<title>[^<]+</title>' | sed -E 's/.*<title>([^<]+)<\/title>.*/\1/' | grep -oE 'v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?')"
+  TAG="$(curl -fsSL "https://github.com/cp-mario/SMP/releases/latest" | grep -m1 -oE '<title>[^<]+</title>' | sed -E 's/.*<title>([^<]+)<\/title>.*/\1/' | grep -oE 'v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?' || true)"
 fi
 if [ -z "${TAG:-}" ]; then
   echo "Could not resolve the latest $CHANNEL release from GitHub." >&2
@@ -49,12 +49,7 @@ rm -rf "$TMP_DIR"
 # Hand the tree to the invoking user so deps, builds and runtime work without root.
 if [ -n "$SUDO" ]; then $SUDO chown -R "$(id -u):$(id -g)" "$INSTALL_DIR"; fi
 
-# --- Dependencies and panel build ---
-cd "$INSTALL_DIR/server"
-bun install
-cd "$INSTALL_DIR/web"
-bun install
-bun run build
+
 
 echo ""
 echo "Installed SMP $VERSION to $INSTALL_DIR"

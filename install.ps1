@@ -27,19 +27,15 @@ $channel = if ($answer -in @("2", "experimental", "exp", "beta", "pre")) { "expe
 Write-Host "Channel: $channel"
 
 # --- Resolve the latest release of the channel (Atom feed / latest page, no API) ---
-try {
-    if ($channel -eq "experimental") {
-        $atom = (Invoke-WebRequest "https://github.com/cp-mario/SMP/releases.atom" -UseBasicParsing).Content
-        $entry = [regex]::Match($atom, "(?s)<entry>.*?</entry>").Value
-        $tag = [regex]::Match($entry, "<title>([^<]+)</title>").Groups[1].Value.Trim()
-    } else {
-        $page = (Invoke-WebRequest "https://github.com/cp-mario/SMP/releases/latest" -UseBasicParsing).Content
-        $tag = [regex]::Match($page, "<title>v?\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?</title>").Value -replace "</?title>", ""
-    }
-} catch {
-    throw "Could not resolve the latest $channel release from GitHub: $($_.Exception.Message)"
+if ($channel -eq "experimental") {
+    $atom = (Invoke-WebRequest "https://github.com/cp-mario/SMP/releases.atom" -UseBasicParsing).Content
+    $entry = [regex]::Match($atom, "(?s)<entry>.*?</entry>").Value
+    $tag = [regex]::Match($entry, "<title>([^<]+)</title>").Groups[1].Value.Trim()
+} else {
+    $page = (Invoke-WebRequest "https://github.com/cp-mario/SMP/releases/latest" -UseBasicParsing).Content
+    $tag = [regex]::Match($page, "<title>[^<]*?(v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)[^<]*</title>").Groups[1].Value
 }
-if (-not $tag) { throw "No $channel release published yet." }
+if (-not $tag) { throw "Could not resolve the latest $channel release from GitHub." }
 $version = $tag -replace '^v', ''
 Write-Host "Downloading SMP $tag (source)..." -ForegroundColor Cyan
 
@@ -60,22 +56,6 @@ $src = Get-ChildItem $tmp -Directory | Where-Object { $_.Name -like "SMP-*" } | 
 if (-not $src) { throw "Unexpected archive layout: no SMP-<version> folder inside the zip." }
 Copy-Item "$($src.FullName)\*" -Destination $installDir -Recurse -Force
 Remove-Item -Recurse -Force $tmp
-
-# --- Dependencies and panel build ---
-Write-Host "Installing dependencies (server)..." -ForegroundColor Cyan
-Push-Location "$installDir\server"
-bun install
-Pop-Location
-
-Write-Host "Installing dependencies (web)..." -ForegroundColor Cyan
-Push-Location "$installDir\web"
-bun install
-Pop-Location
-
-Write-Host "Building web panel..." -ForegroundColor Cyan
-Push-Location "$installDir\web"
-bun run build
-Pop-Location
 
 Write-Host ""
 Write-Host "Installed SMP $version to $installDir" -ForegroundColor Green
