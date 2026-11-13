@@ -1,0 +1,88 @@
+/* ==========================================================================
+   Design tokens
+   Single source of truth for colour, type, spacing, radius and elevation.
+   `--accent` can be overridden at runtime (documentElement inline style), so
+   every derived accent token uses color-mix() and updates automatically.
+   ========================================================================== */
+
+:root {
+  color-scheme: dark;
+
+  /* Canvas & surfaces */
+  --bg: #0a0a0d;
+  --bg-soft: #0d0d11;
+  --sidebar: #0b0b0f;
+  --panel: #111116;
+  --panel-elevated: #16161c;
+  --panel-hover: #1b1b22;
+  --input-bg: #0c0c11;
+
+  /* Borders */
+  --border: #222229;
+  --border-secondary: #2e2e37;
+  --border-strong: #3c3c47;
+
+  /* Text */
+  --text: #f4f4f7;
+  --text-secondary: #a2a2ad;
+  --text-disabled: #666671;
+  --muted: #8b8b96;
+
+  /* Accent (runtime-overridable) */
+  --accent: #9255e8;
+  --accent-hover: color-mix(in srgb, var(--accent) 84%, #fff);
+  --accent-dark: color-mix(in srgb, var(--accent) 76%, #000);
+  --accent-light: color-mix(in srgb, var(--accent) 14%, transparent);
+  --accent-soft: color-mix(in srgb, var(--accent) 7%, transparent);
+  --accent-ring: color-mix(in srgb, var(--accent) 30%, transparent);
+
+  /* Semantic tones */
+  --success: #3ddc84;
+  --success-soft: rgba(61, 220, 132, 0.11);
+  --success-border: rgba(61, 220, 132, 0.32);
+  --danger: #f05252;
+  --danger-soft: rgba(240, 82, 82, 0.11);
+  --danger-border: rgba(240, 82, 82, 0.34);
+  --warning: #f0b429;
+  --warning-soft: rgba(240, 180, 41, 0.11);
+  --warning-border: rgba(240, 180, 41, 0.34);
+  --info: #5aa2f7;
+  --info-soft: rgba(90, 162, 247, 0.11);
+  --info-border: rgba(90, 162, 247, 0.32);
+
+  /* Typography */
+  --font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  /* Radii — deliberately restrained: crisp, not pill-shaped */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
+  --radius-modal: 12px;
+  --radius-input: 7px;
+  --radius-btn: 7px;
+  --radius-pill: 999px;
+
+  /* Elevation */
+  --shadow-xs: 0 1px 2px rgb(0 0 0 / 0.3);
+  --shadow-sm: 0 2px 6px -2px rgb(0 0 0 / 0.45);
+  --shadow: 0 12px 32px -24px rgb(0 0 0 / 0.9);
+  --shadow-lg: 0 24px 60px -24px rgb(0 0 0 / 0.85);
+  --shadow-glow: 0 10px 30px -12px var(--accent-ring);
+  --ring: 0 0 0 3px var(--accent-light);
+
+  /* Motion */
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --t-fast: 120ms var(--ease);
+  --t: 180ms var(--ease);
+
+  /* Shell */
+  --sidebar-w: 272px;
+  --z-sidebar: 50;
+  --z-mobile-nav: 60;
+  --z-modal: 100;
+  --z-toast: 900;
+}

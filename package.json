@@ -1,0 +1,22 @@
+{
+  "name": "smp-panel",
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Minecraft server panel",
+  "scripts": {
+    "start": "bun run start.js",
+    "dev": "bun run start.js",
+    "build": "node ./scripts/vp.js build",
+    "build:server": "bun run server/src/build.js",
+    "build:web": "node ./scripts/vp.js build",
+    "version": "node ./scripts/version.js get",
+    "bump:patch": "node ./scripts/version.js bump",
+    "server": "bun run server/src/index.js",
+    "check": "cd web && bun x svelte-check --output human",
+    "test": "cd web && bun test ./tests"
+  },
+  "engines": {
+    "bun": ">=1.4.4"
+  },
+  "engineStrict": true
+}

@@ -1,0 +1,77 @@
+name: Sync version
+
+# A manually published release (GitHub UI -> Draft a new release -> Publish,
+# without the "pre-release" checkbox) becomes the new version base: this writes
+# its tag into the root package.json.
+#
+# Pre-releases are skipped: they are created by the Pre-release workflow, which
+# has already written that same version into package.json.
+#
+#   0.1.3 (pre-release)          -> skipped, package.json already says 0.1.3
+#   publish 1.0.0 manually       -> package.json becomes 1.0.0
+#   next push                    -> pre-release 1.0.1, 1.0.2, ...
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-version
+  cancel-in-progress: false
+
+env:
+  BRANCH: ${{ github.event.repository.default_branch }}
+
+jobs:
+  sync:
+    name: Write the released version into package.json
+    if: github.event.release.prerelease == false && github.event.release.draft == false
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Sync package.json with the release tag
+        id: sync
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.release.tag_name }}"
+          VERSION="$(printf '%s' "$TAG" | sed -E 's/^[^0-9]*//')"
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Tag '$TAG' is not a major.minor.patch version; leaving package.json alone."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          BEFORE="$(node scripts/version.js get)"
+          if node scripts/version.js set "$VERSION"; then
+            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "package.json: $BEFORE -> $VERSION"
+          else
+            echo "package.json already at $VERSION"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit and push the synced version
+        if: steps.sync.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.sync.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json
+          git commit -m "chore(release): sync package.json to v${VERSION} [skip ci]"
+          git push origin "HEAD:${BRANCH}"

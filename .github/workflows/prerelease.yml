@@ -1,0 +1,136 @@
+name: Pre-release
+
+# Every push to the main branch publishes a pre-release.
+#
+#   0.1.0  --push-->  0.1.1 (pre-release v0.1.1, package.json updated)
+#   0.1.1  --push-->  0.1.2 ...
+#
+# The version bump is committed with the GITHUB_TOKEN and a "[skip ci]" marker,
+# so the bump commit does not start another run.
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: prerelease-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  BRANCH: ${{ github.ref_name }}
+  WEB_BUILD_DIR: server/src/public
+
+jobs:
+  prerelease:
+    name: Bump version and publish pre-release
+    runs-on: ubuntu-latest
+    outputs:
+      skip: ${{ steps.guard.outputs.skip }}
+      version: ${{ steps.bump.outputs.version }}
+      tag: ${{ steps.bump.outputs.tag }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Detect automated commits
+        id: guard
+        run: |
+          MSG="$(git log -1 --pretty=%B)"
+          if printf '%s' "$MSG" | grep -qi '\[skip ci\]'; then
+            echo "Automated commit ($MSG); nothing to publish."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Bump the patch version
+        id: bump
+        if: steps.guard.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          CURRENT="$(node scripts/version.js get)"
+          NEXT="$(node scripts/version.js bump)"
+          echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
+          echo "version=$NEXT" >> "$GITHUB_OUTPUT"
+          echo "tag=v$NEXT" >> "$GITHUB_OUTPUT"
+          echo "Bumping $CURRENT -> $NEXT"
+
+      - name: Commit, tag and push the bump
+        if: steps.guard.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.bump.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json
+          git commit -m "chore(release): v${VERSION} [skip ci]"
+          git tag "v${VERSION}"
+          git push origin "HEAD:${BRANCH}"
+          git push origin "v${VERSION}"
+
+      - name: Publish the pre-release
+        if: steps.guard.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.bump.outputs.tag }}
+          VERSION: ${{ steps.bump.outputs.version }}
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" \
+            --prerelease \
+            --target "$BRANCH" \
+            --title "$TAG" \
+            --generate-notes
+
+  assets:
+    name: Build and attach the panel bundle
+    needs: prerelease
+    if: needs.prerelease.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prerelease.outputs.tag }}
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install web dependencies
+        working-directory: web
+        run: bun install --frozen-lockfile
+
+      - name: Build the panel
+        working-directory: web
+        run: bun run build
+
+      - name: Package the panel bundle
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.prerelease.outputs.version }}"
+          test -f "$WEB_BUILD_DIR/index.html"
+          zip -qr "smp-web-${VERSION}.zip" "$WEB_BUILD_DIR"
+          echo "asset=smp-web-${VERSION}.zip" >> "$GITHUB_ENV"
+          ls -lh "smp-web-${VERSION}.zip"
+
+      - name: Upload to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prerelease.outputs.tag }}
+        run: gh release upload "$TAG" "$asset" --clobber

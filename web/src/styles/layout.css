@@ -1,0 +1,128 @@
+/* ==========================================================================
+   App shell & page layout
+   ========================================================================== */
+
+.app {
+  display: flex;
+  min-height: 100vh;
+}
+
+.main-content {
+  flex: 1;
+  min-width: 0;
+  margin-left: var(--sidebar-w);
+  padding: 34px 40px 104px;
+}
+
+.view {
+  width: 100%;
+  max-width: 1500px;
+  margin: 0 auto;
+}
+
+/* ---------- Page header ---------- */
+
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  flex-wrap: wrap;
+  margin-bottom: 24px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.page-header h1 {
+  margin: 0;
+  font-size: clamp(1.45rem, 2vw, 1.8rem);
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.035em;
+  text-wrap: balance;
+}
+
+.page-header .subtitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+  color: var(--text-secondary);
+  font-size: 0.84rem;
+}
+
+.page-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  color: color-mix(in srgb, var(--accent) 58%, var(--text-secondary));
+  font-size: 0.67rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ---------- Generic layout helpers ---------- */
+
+.section {
+  margin-bottom: 28px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.divider {
+  height: 1px;
+  background: var(--border);
+  border: 0;
+}
+
+/* ---------- Responsive ---------- */
+
+@media (max-width: 1100px) {
+  .main-content {
+    padding: 28px 26px 100px;
+  }
+}
+
+@media (max-width: 900px) {
+  .main-content {
+    margin-left: 0;
+    padding: 22px 18px 100px;
+  }
+
+  .page-header h1 {
+    font-size: 1.4rem;
+  }
+}
+
+@media (max-width: 560px) {
+  .main-content {
+    padding: 18px 14px 96px;
+  }
+
+  .page-header {
+    gap: 12px;
+    margin-bottom: 18px;
+    padding-bottom: 14px;
+  }
+}

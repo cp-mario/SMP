@@ -1,0 +1,6 @@
+/* Global stylesheet entry point.
+   Order matters: tokens → reset/base → layout → shared components. */
+@import "./styles/tokens.css";
+@import "./styles/base.css";
+@import "./styles/layout.css";
+@import "./styles/components.css";

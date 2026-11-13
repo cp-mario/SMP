@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#9255E8" />
+    <meta name="description" content="SMP - Simple Minecraft Server Panel" />
+    <title>SMP - Minecraft Server Panel</title>
+    <style>
+      /* First paint before the stylesheet chunk arrives: no white flash. */
+      html { background: #0a0a0d; color-scheme: dark; }
+      body { margin: 0; background: #0a0a0d; }
+    </style>
+    <script>
+      // Apply the saved accent before the stylesheet paints to avoid a colour flash.
+      try {
+        var accent = localStorage.getItem("smp.accent");
+        if (accent) document.documentElement.style.setProperty("--accent", accent);
+      } catch (e) { /* storage unavailable */ }
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

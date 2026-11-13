@@ -1,0 +1,69 @@
+# Dependencies
+node_modules/
+.bun-install-cache/
+
+# AI
+.playwright-mcp
+
+# Package manager / lock artifacts (keep bun.lock)
+.bun.lockb
+
+# Build outputs
+dist/
+build/
+output/
+.svelte-kit/
+package/
+
+# Frontend build output (Vite outDir: server/src/public)
+server/src/public/
+
+# SMP runtime data
+data/
+.smp/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.db
+
+# Java runtimes / server instances (when stored in-repo by misconfig)
+java/
+servers/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Environment / secrets
+.env
+.env.local
+.env.*.local
+
+# Test / tooling
+coverage/
+.playwright/
+playwright-report/
+test-results/
+blob-report/
+
+# IDE / editor
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*.swo
+*~
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
