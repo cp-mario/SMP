@@ -2951,6 +2951,10 @@ export const updatesRoute = new Elysia({ prefix: "/api/updates" })
     const state = await getUpdateState({ channel, force: true });
     const { ids, stopped } = await stopAllServers();
     const result = await applyUpdate({ target, current: state.current, channel });
+    // The detached updater replaces the installation once this process exits.
+    if (result.ok && result.restarting) {
+      setTimeout(() => { try { process.exit(0); } catch {} }, 1500);
+    }
     return { ok: result.ok, code: result.code || null, message: result.message || null, target, channel, version: state.current, servers: { total: ids.length, stopped }, applying: true };
   })
   .post("/shutdown", async ({ body, set }) => {

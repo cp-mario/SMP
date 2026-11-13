@@ -4,10 +4,12 @@
 // boot, the CLI prints it, and the panel compares it against the GitHub releases
 // of the selected channel (stable or experimental) to decide whether an update
 // is available.
-import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync, readdirSync, cpSync } from "fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync, renameSync, readdirSync } from "fs";
 import { createHash } from "crypto";
 import { dirname, join, resolve } from "path";
 import { fileURLToPath } from "url";
+import { spawn } from "child_process";
+import { tmpdir } from "os";
 import AdmZip from "adm-zip";
 import { x as untar } from "tar";
 
@@ -225,7 +227,6 @@ async function fetchLatestReleaseViaFeed(wantPrerelease) {
     return err;
   };
 
-  let tag = null;
   const res = await fetch(wantPrerelease ? `${RELEASES_FEED}.atom` : `${RELEASES_FEED}/latest`, {
     headers: { "User-Agent": USER_AGENT },
     signal: AbortSignal.timeout(15000),
@@ -237,6 +238,7 @@ async function fetchLatestReleaseViaFeed(wantPrerelease) {
     throw err;
   }
 
+  let tag = null;
   if (wantPrerelease) {
     tag = parseFeedTags(await res.text())[0] || null;
   } else {
@@ -414,6 +416,64 @@ function releaseForVersion(version) {
   };
 }
 
+/**
+ * Detached updater: waits for the panel process to exit, moves the old
+ * installation into a trash folder (same volume => instant rename), moves the
+ * staged tree in its place, drops the trash and relaunches the launcher.
+ * It runs from a temp directory so the installation can be wiped completely.
+ */
+const UPDATER_HELPER = `
+import { spawn } from "child_process";
+import { basename, join } from "path";
+import { readdirSync, renameSync, rmSync, mkdirSync } from "fs";
+
+const [, , pidArg, stageDir, installDir, entry] = process.argv;
+const pid = Number(pidArg);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function waitExit(p, timeoutMs) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try { process.kill(p, 0); } catch { return true; }
+    await sleep(250);
+  }
+  return false;
+}
+
+if (!pid || !stageDir || !installDir) process.exit(1);
+if (!(await waitExit(pid, 120000))) { console.error("updater: the panel did not exit"); process.exit(1); }
+await sleep(1000);
+
+const stageBase = basename(stageDir);
+const tree = join(stageDir, "tree");
+const trash = join(stageDir, "trash");
+mkdirSync(trash, { recursive: true });
+
+for (const name of readdirSync(installDir)) {
+  if (name === stageBase) continue;
+  try { renameSync(join(installDir, name), join(trash, name)); } catch (e) { console.error("updater: skip " + name + ": " + e.message); }
+}
+
+for (const name of readdirSync(tree)) {
+  renameSync(join(tree, name), join(installDir, name));
+}
+
+rmSync(trash, { recursive: true, force: true });
+rmSync(stageDir, { recursive: true, force: true });
+
+const child = spawn(process.execPath, ["run", entry], { cwd: installDir, detached: true, stdio: "ignore", env: process.env });
+child.unref();
+console.log("updater: update applied");
+`;
+
+/** Writes the helper to a temp dir and starts it detached for this panel PID. */
+function spawnUpdater({ stage, installDir, entry, pid }) {
+  const helperPath = join(tmpdir(), `smp-update-${pid}-${Date.now()}.mjs`);
+  writeFileSync(helperPath, UPDATER_HELPER);
+  const child = spawn(process.execPath, [helperPath, String(pid), stage, installDir, entry], { detached: true, stdio: "ignore", env: process.env });
+  child.unref();
+}
+
 async function downloadFile(url, destPath) {
   const res = await fetch(url, {
     headers: { "User-Agent": USER_AGENT },
@@ -456,13 +516,15 @@ async function downloadSource(version, destPath) {
 }
 
 /**
- * Updates the installation in place, the same way the installers work: picks the
- * channel's release from GitHub (stable = final releases only, experimental =
+ * Updates the installation the way the installers work: picks the channel's
+ * release from GitHub (stable = final releases only, experimental =
  * pre-releases included), downloads the release source archive (tar.gz on
- * Linux/macOS, zip on Windows) and copies the whole project tree over the
- * installation directory (ROOT_DIR: /opt/smp or C:\Program Files\smp).
+ * Linux/macOS, zip on Windows), stages it inside the installation directory,
+ * then hands over to a detached updater that closes the panel, replaces every
+ * old file with the new tree and relaunches the launcher.
  *
- * Callers must stop every running server before calling this.
+ * Callers must stop every running server before calling this. The panel (or
+ * CLI) process must exit after this resolves for the swap to happen.
  */
 export async function applyUpdate({ target = "", current = "", channel = "stable" } = {}) {
   const from = String(current || "").trim();
@@ -528,11 +590,9 @@ export async function applyUpdate({ target = "", current = "", channel = "stable
         setStep(steps, "verify", "skipped");
       }
 
-      let unpacked;
-      let srcRoot;
+      const unpacked = join(stage, "unpacked");
+      let srcRoot = unpacked;
       try {
-        unpacked = join(stage, "unpacked");
-        srcRoot = unpacked;
         if (downloaded.ext === "zip") {
           new AdmZip(archivePath).extractAllTo(unpacked, true);
           // GitHub zips wrap the tree in a SMP-<version> folder.
@@ -551,23 +611,35 @@ export async function applyUpdate({ target = "", current = "", channel = "stable
         return fail(steps, "install", "NO_SOURCE", "The archive does not look like an SMP source tree.");
       }
 
-      // Copy the whole project tree over the installation directory.
-      setStep(steps, "install", "pending");
-      try {
-        cpSync(join(srcRoot, "package.json"), join(ROOT_DIR, "package.json"));
-        for (const name of readdirSync(srcRoot)) {
-          if (name === "package.json") continue;
-          cpSync(join(srcRoot, name), join(ROOT_DIR, name), { recursive: true, force: true });
+      // Build the new tree inside the stage (same volume => instant renames),
+      // keeping the installed dependencies so the first launch is fast.
+      const tree = join(stage, "tree");
+      mkdirSync(tree, { recursive: true });
+      for (const name of readdirSync(srcRoot)) renameSync(join(srcRoot, name), join(tree, name));
+      for (const rel of ["node_modules", "server/node_modules", "web/node_modules"]) {
+        const old = join(ROOT_DIR, rel);
+        const dst = join(tree, rel);
+        if (existsSync(old) && !existsSync(dst)) {
+          try { mkdirSync(dirname(dst), { recursive: true }); renameSync(old, dst); } catch { /* reinstalled on first launch */ }
         }
+      }
+
+      // Hand over to the detached updater and let this process exit.
+      setStep(steps, "install", "pending");
+      const entry = join(ROOT_DIR, "start.js");
+      try {
+        spawnUpdater({ stage, installDir: ROOT_DIR, entry, pid: process.pid });
       } catch (e) {
-        return fail(steps, "install", "INSTALL_FAILED", `Could not replace the installation files in ${ROOT_DIR}: ${e?.message || e}`);
+        return fail(steps, "install", "SPAWN_FAILED", `Could not start the updater: ${e?.message || e}`);
       }
       setStep(steps, "install", "done");
+      setStep(steps, "restart", "done");
 
       return {
         ok: true,
         code: "OK",
-        message: `SMP ${version} installed in ${ROOT_DIR}. Restart the panel to finish.`,
+        restarting: true,
+        message: `SMP ${version} is being installed in ${ROOT_DIR}. The panel will close, update and restart.`,
         version,
         previousVersion: from,
         channel: normalizeChannel(channel),
@@ -575,8 +647,10 @@ export async function applyUpdate({ target = "", current = "", channel = "stable
         checksumVerified,
         steps,
       };
-    } finally {
+    } catch (e) {
+      // Extraction/tree failures happen before the updater takes over.
       rmSync(stage, { recursive: true, force: true });
+      throw e;
     }
   } catch (e) {
     const status = e?.status || 0;
