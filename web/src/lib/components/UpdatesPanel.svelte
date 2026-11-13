@@ -103,6 +103,9 @@
     try {
       const res = await applyUpdate(latest, channel);
       if (res?.ok) {
+        // Follow the update in a console tab: the panel closes, swaps the files
+        // and restarts (bun install + web build included).
+        window.open("/update", "_blank");
         toasts.success(`Updated to ${latest}. The panel is restarting…`);
       } else if (res?.code === "NOT_CONFIGURED") {
         toasts.warning("Self-update is not wired up yet");

@@ -1,5 +1,6 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/sh
+# POSIX sh: safe to run as `curl ... | sh` (dash does not support pipefail).
+set -eu
 
 echo "SMP Installer (Linux)"
 
@@ -53,4 +54,4 @@ if [ -n "$SUDO" ]; then $SUDO chown -R "$(id -u):$(id -g)" "$INSTALL_DIR"; fi
 
 echo ""
 echo "Installed SMP $VERSION to $INSTALL_DIR"
-echo "Run the panel with: bun run $INSTALL_DIR/start.js"
+echo "Run the panel in another terminal with: bun run $INSTALL_DIR/start.js"

@@ -2942,9 +2942,94 @@ function resolveUpdateChannel(explicit) {
   return normalizeChannel(stored || defaultChannel());
 }
 
+// Console page served while a self-update runs: polls /api/updates/log, which
+// the detached updater and the relaunched panel append to.
+const UPDATE_PAGE_HTML = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SMP update</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #0d1117; color: #e6edf3; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 24px 16px 48px; }
+  header { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+  header h1 { font-size: 1rem; margin: 0; font-weight: 700; letter-spacing: 0.02em; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: #3fb950; box-shadow: 0 0 8px #3fb950; }
+  .badge { font-size: 0.7rem; padding: 3px 9px; border-radius: 999px; border: 1px solid #30363d; color: #8b949e; }
+  .badge.ok { color: #3fb950; border-color: #238636; }
+  .badge.warn { color: #d29922; border-color: #9e6a03; }
+  pre { margin: 0; padding: 14px; background: #010409; border: 1px solid #30363d; border-radius: 10px; height: 62vh; overflow: auto; font-size: 0.78rem; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
+  footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; color: #8b949e; font-size: 0.72rem; flex-wrap: wrap; }
+  button { background: #21262d; color: #e6edf3; border: 1px solid #30363d; border-radius: 6px; padding: 5px 12px; font: inherit; font-size: 0.72rem; cursor: pointer; }
+  button:hover { border-color: #8b949e; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header><span class="dot"></span><h1>SMP update</h1><span id="status" class="badge">connecting…</span></header>
+  <pre id="log">Waiting for the updater…</pre>
+  <footer><span>The panel closes, swaps the files and restarts. This page follows the updater log.</span><button onclick="location.reload()">Reload</button></footer>
+</div>
+<script>
+  const pre = document.getElementById("log");
+  const status = document.getElementById("status");
+  let lastLength = 0;
+  let done = false;
+
+  async function poll() {
+    try {
+      const res = await fetch("/api/updates/log", { cache: "no-store" });
+      if (!res.ok) throw new Error(String(res.status));
+      const text = await res.text();
+      status.textContent = done ? "update complete" : "live";
+      status.className = "badge ok";
+      if (text.length !== lastLength) {
+        const atBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 40;
+        pre.textContent = text || "Waiting for the updater…";
+        if (atBottom) pre.scrollTop = pre.scrollHeight;
+        lastLength = text.length;
+      }
+      if (!done && /updater: panel relaunched/.test(text)) {
+        done = true;
+        status.textContent = "update complete — waiting for the panel…";
+      }
+      if (done) {
+        // The page is served by the panel, so a successful log fetch means the
+        // new panel is live: head back to the app.
+        status.textContent = "update complete — reloading…";
+        setTimeout(() => { location.href = "/"; }, 2500);
+        return;
+      }
+    } catch {
+      status.textContent = done ? "update complete — starting panel…" : "panel restarting…";
+      status.className = "badge warn";
+    }
+    setTimeout(poll, 1000);
+  }
+  poll();
+</script>
+</body>
+</html>`;
+
 export const updatesRoute = new Elysia({ prefix: "/api/updates" })
   .get("/", async ({ query }) => getUpdateState({ channel: resolveUpdateChannel(query?.channel) }))
   .post("/check", async ({ body }) => getUpdateState({ channel: resolveUpdateChannel(body?.channel), force: true }))
+
+  // Tail of the updater log (written by the detached updater and the relaunched
+  // panel), consumed by the /update console page.
+  .get("/log", () => {
+    const headers = { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" };
+    try {
+      const buf = readFileSync(join(process.env.SMP_DATA_DIR || join(homedir(), ".smp"), "update.log"));
+      return new Response(buf.subarray(Math.max(0, buf.length - 65536)).toString("utf8"), { headers });
+    } catch {
+      return new Response("", { headers });
+    }
+  })
+
   .post("/apply", async ({ body }) => {
     const target = String(body?.version || "").trim();
     const channel = resolveUpdateChannel(body?.channel);
@@ -3016,6 +3101,7 @@ const app = new Elysia()
   .use(sftpRoute)
   .use(serverIconRoute)
   .use(updatesRoute)
+  .get("/update", () => new Response(UPDATE_PAGE_HTML, { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } }))
   .get("/api/health", () => ({ ok: true, service: "smp", port: Number(process.env.SMP_PORT || process.env.PORT || 3001), pid: process.pid }))
   .get("/api/panel/info", () => ({ ok: true, service: "smp", version: appVersion(), port: Number(process.env.SMP_PORT || process.env.PORT || 3001), pid: process.pid, startedAt: globalThis.__smp_startedAt || (globalThis.__smp_startedAt = Date.now()) }))
   .get("/*", ({ request }) => {
