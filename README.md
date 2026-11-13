@@ -10,18 +10,19 @@ Minecraft server panel: a web UI to create, configure and run Minecraft servers,
 curl -fsSL https://raw.githubusercontent.com/cp-mario/SMP/main/install.sh | sh
 ```
 
-**Windows** (PowerShell as Administrator)
+**Windows**
 
 ```powershell
 powershell -c "irm https://raw.githubusercontent.com/cp-mario/SMP/main/install.ps1|iex"
 ```
 
-The installer asks for the release channel (latest **stable** — recommended — or latest **experimental**), installs Bun with the official installer if missing, downloads the source of that release from GitHub, and installs the project into `/opt/smp` (Linux) or `C:\Program Files\smp` (Windows). It then installs the dependencies, builds the web panel and prints how to run it.
+The installer asks for the release channel (latest **stable** — recommended — or latest **experimental**), installs Bun with the official installer if missing, downloads the source of that release from GitHub, and installs the project into `/opt/smp` (Linux) or `%LOCALAPPDATA%\SMP` (Windows). It then installs the dependencies, builds the web panel and prints how to run it.
 
 ## Run
 
 ```sh
-bun run /opt/smp/start.js
+bun run /opt/smp/start.js                 # Linux / macOS
+bun run "%LOCALAPPDATA%\SMP\start.js"     # Windows
 ```
 
 The launcher installs missing dependencies, builds the web app, checks the port (default `3001`) and starts the API + panel at http://localhost:3001.
@@ -30,10 +31,6 @@ The launcher installs missing dependencies, builds the web app, checks the port 
 
 The panel checks GitHub releases for the selected channel (stable = final releases only, experimental = pre-releases included) and updates itself in place in its installation directory: Settings → Updates, or:
 
-```sh
-bun run /opt/smp/server/src/cli.js update          # latest of the current channel
-bun run /opt/smp/server/src/cli.js update exp      # latest experimental
-```
 
 ## Features
 
@@ -45,20 +42,6 @@ bun run /opt/smp/server/src/cli.js update exp      # latest experimental
 - SFTP file access to server directories.
 - Java version management per server.
 
-## CLI
-
-```sh
-bun run server/src/cli.js <command>
-```
-
-| Command | Description |
-| --- | --- |
-| `status` | Show panel status |
-| `start` / `run` | Start the panel server |
-| `stop` | Stop a running panel |
-| `update [channel]` | Self-update from GitHub |
-| `version` | Print the version |
-| `uninstall` | Uninstall instructions |
 
 ## Development
 
@@ -100,7 +83,7 @@ Web tests: `cd web && bun test ./tests`
 ## Project layout
 
 ```
-install.sh / install.ps1   one-shot installers (GitHub release -> /opt/smp or C:\Program Files\smp)
+install.sh / install.ps1   one-shot installers (GitHub release -> /opt/smp or %LOCALAPPDATA%\SMP)
 start.js                   launcher (port check, deps, build, run)
 server/                    Elysia API (Bun), loaders, mods, backups, SFTP, self-update
 web/                       Svelte 5 + Vite web panel

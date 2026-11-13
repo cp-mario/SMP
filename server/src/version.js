@@ -523,6 +523,9 @@ async function downloadSource(version, destPath) {
  * then hands over to a detached updater that closes the panel, replaces every
  * old file with the new tree and relaunches the launcher.
  *
+ * ROOT_DIR is /opt/smp on Linux and %LOCALAPPDATA%\SMP on Windows, both
+ * writable by the user running the panel (no admin needed).
+ *
  * Callers must stop every running server before calling this. The panel (or
  * CLI) process must exit after this resolves for the swap to happen.
  */

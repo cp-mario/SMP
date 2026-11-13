@@ -3,7 +3,7 @@
     SMP Installer (Windows)
 .DESCRIPTION
     Installs Bun (official installer) if missing, asks for the release channel,
-    downloads the source from GitHub and installs it into C:\Program Files\smp.
+    downloads the source from GitHub and installs it into %LOCALAPPDATA%\SMP.
 #>
 $ErrorActionPreference = "Stop"
 
@@ -40,9 +40,7 @@ $version = $tag -replace '^v', ''
 Write-Host "Downloading SMP $tag (source)..." -ForegroundColor Cyan
 
 # --- Download and unpack the source ---
-$installDir = "C:\Program Files\smp"
-$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-if (-not $isAdmin) { throw "This installer writes to `"$installDir`". Run PowerShell as Administrator." }
+$installDir = Join-Path $env:LOCALAPPDATA "SMP"
 
 $tmp = Join-Path $env:TEMP "smp-install"
 if (Test-Path $tmp) { Remove-Item -Recurse -Force $tmp }
@@ -59,4 +57,4 @@ Remove-Item -Recurse -Force $tmp
 
 Write-Host ""
 Write-Host "Installed SMP $version to $installDir" -ForegroundColor Green
-Write-Host "Run the panel with: bun run $installDir\start.js" -ForegroundColor Green
+Write-Host "Run the panel with: bun run \"${installDir}\start.js\"" -ForegroundColor Green
