@@ -1,57 +1,231 @@
+
 #!/bin/sh
-# POSIX sh: safe to run as `curl ... | sh` (dash does not support pipefail).
+# POSIX sh: safe to run as curl ... | sh
 set -eu
+
+REPO="cp-mario/SMP"
+INSTALL_DIR="/opt/smp"
+TMP_DIR=""
+STAGE_DIR=""
+BACKUP_DIR=""
+SUDO=""
 
 echo "SMP Installer (Linux)"
 
-# --- Bun (official installer, only when missing) ---
-if ! command -v bun >/dev/null 2>&1; then
-  echo "Installing Bun..."
-  curl -fsSL https://bun.sh/install | bash
-  export PATH="$HOME/.bun/bin:$PATH"
-  if ! command -v bun >/dev/null 2>&1; then
-    echo "Bun installation failed." >&2
-    exit 1
-  fi
+# --- Cleanup ---
+
+cleanup() {
+    if [ -n "$STAGE_DIR" ]; then
+        if [ -n "$SUDO" ]; then
+            sudo rm -rf "$STAGE_DIR"
+        else
+            rm -rf "$STAGE_DIR"
+        fi
+    fi
+
+    if [ -n "$TMP_DIR" ]; then
+        rm -rf "$TMP_DIR"
+    fi
+}
+
+trap cleanup 0
+trap 'exit 1' HUP INT TERM
+
+# --- Requirements ---
+
+for cmd in curl tar mktemp sed grep tr id head; do
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+        echo "Missing dependency: $cmd" >&2
+        exit 1
+    fi
+done
+
+if [ "$(id -u)" -ne 0 ]; then
+    if ! command -v sudo >/dev/null 2>&1; then
+        echo "sudo is required to install SMP into /opt." >&2
+        exit 1
+    fi
+    SUDO="sudo"
 fi
 
+# --- Bun (official installer, only when missing) ---
+
+if ! command -v bun >/dev/null 2>&1; then
+    echo "Installing Bun..."
+
+    if ! command -v bash >/dev/null 2>&1; then
+        echo "Bash is required by the official Bun installer." >&2
+        exit 1
+    fi
+
+    curl -fsSL https://bun.sh/install | bash
+
+    export PATH="$HOME/.bun/bin:$PATH"
+
+    if ! command -v bun >/dev/null 2>&1; then
+        echo "Bun installation failed." >&2
+        exit 1
+    fi
+fi
+
+echo "Bun: $(bun --version)"
+
 # --- Release channel ---
+
+echo ""
 echo "Choose the release channel:"
 echo "  1) Stable (recommended)"
 echo "  2) Experimental (pre-releases included)"
-read -rp "Channel [1/stable, default 1]: " CHANNEL_ANSWER
+
+CHANNEL_ANSWER=""
+
+if [ -t 0 ]; then
+    printf "Channel [1/stable, default 1]: "
+    IFS= read -r CHANNEL_ANSWER || CHANNEL_ANSWER=""
+elif [ -r /dev/tty ]; then
+    printf "Channel [1/stable, default 1]: " >/dev/tty
+    IFS= read -r CHANNEL_ANSWER </dev/tty || CHANNEL_ANSWER=""
+else
+    echo "No interactive terminal. Using stable."
+fi
+
 case "$(printf '%s' "$CHANNEL_ANSWER" | tr '[:upper:]' '[:lower:]')" in
-  2|experimental|exp|beta|pre) CHANNEL="experimental" ;;
-  *) CHANNEL="stable" ;;
+    2|experimental|exp|beta|pre)
+        CHANNEL="experimental"
+        ;;
+    *)
+        CHANNEL="stable"
+        ;;
 esac
+
 echo "Channel: $CHANNEL"
 
-# --- Resolve the latest release of the channel (Atom feed / latest page, no API) ---
+# --- Temporary directory ---
+
+TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/smp-install.XXXXXX")"
+
+# --- Resolve latest release (Atom feed / latest page, no API) ---
+
+echo ""
+echo "Resolving latest $CHANNEL release..."
+
 if [ "$CHANNEL" = "experimental" ]; then
-  TAG="$(curl -fsSL "https://github.com/cp-mario/SMP/releases.atom" | sed -n '/<entry>/,/<\/entry>/p' | grep -m1 -oE '<title>[^<]+</title>' | sed -E 's/.*<title>([^<]+)<\/title>.*/\1/' || true)"
+    curl -fsSL \
+        "https://github.com/$REPO/releases.atom" \
+        -o "$TMP_DIR/releases.atom"
+
+    # Extract the title from the first Atom entry.
+    TAG="$(
+        sed ':a;N;$!ba;s/\n/ /g' "$TMP_DIR/releases.atom" |
+        sed -n 's/.*<entry>\(.*\)<\/entry>.*/\1/p' |
+        sed -n 's/.*<title>\([^<]*\)<\/title>.*/\1/p' |
+        head -n 1 |
+        tr -d '\r'
+    )"
 else
-  TAG="$(curl -fsSL "https://github.com/cp-mario/SMP/releases/latest" | grep -m1 -oE '<title>[^<]+</title>' | sed -E 's/.*<title>([^<]+)<\/title>.*/\1/' | grep -oE 'v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?' || true)"
+    curl -fsSL \
+        "https://github.com/$REPO/releases/latest" \
+        -o "$TMP_DIR/release.html"
+
+    TAG="$(
+        grep -m1 -oE '<title>[^<]+</title>' "$TMP_DIR/release.html" |
+        sed -E 's/<title>([^<]+)<\/title>/\1/' |
+        grep -oE 'v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?' ||
+        true
+    )"
 fi
-if [ -z "${TAG:-}" ]; then
-  echo "Could not resolve the latest $CHANNEL release from GitHub." >&2
-  exit 1
+
+if [ -z "$TAG" ]; then
+    echo "Could not resolve the latest $CHANNEL release from GitHub." >&2
+    exit 1
 fi
+
 VERSION="${TAG#v}"
+
 echo "Downloading SMP $TAG (source)..."
 
-# --- Download and unpack the source ---
-INSTALL_DIR="/opt/smp"
-if [ "$(id -u)" -eq 0 ]; then SUDO=""; else SUDO="sudo"; fi
-TMP_DIR="$(mktemp -d)"
-curl -fsSL "https://github.com/cp-mario/SMP/archive/refs/tags/$TAG.tar.gz" -o "$TMP_DIR/smp.tar.gz"
-$SUDO mkdir -p "$INSTALL_DIR"
-tar -xzf "$TMP_DIR/smp.tar.gz" -C "$INSTALL_DIR" --strip-components=1
-rm -rf "$TMP_DIR"
-# Hand the tree to the invoking user so deps, builds and runtime work without root.
-if [ -n "$SUDO" ]; then $SUDO chown -R "$(id -u):$(id -g)" "$INSTALL_DIR"; fi
+# --- Download source ---
 
+ARCHIVE_URL="https://github.com/$REPO/archive/refs/tags/$TAG.tar.gz"
 
+if ! curl -fLsS --retry 3 --retry-delay 1 \
+    "$ARCHIVE_URL" \
+    -o "$TMP_DIR/smp.tar.gz"; then
+
+    echo "Failed to download SMP source." >&2
+    exit 1
+fi
+
+# --- Prepare installation directory ---
+
+run_root() {
+    if [ -n "$SUDO" ]; then
+        sudo "$@"
+    else
+        "$@"
+    fi
+}
+
+run_root mkdir -p "$(dirname "$INSTALL_DIR")"
+
+STAGE_DIR="$(run_root mktemp -d "$(dirname "$INSTALL_DIR")/.smp-install.XXXXXX")"
+
+# --- Extract source ---
+
+echo "Extracting source..."
+
+if ! run_root tar -xzf "$TMP_DIR/smp.tar.gz" \
+    -C "$STAGE_DIR" --strip-components=1; then
+
+    echo "Failed to extract SMP source." >&2
+    exit 1
+fi
+
+# --- Validate source ---
+
+if ! run_root test -f "$STAGE_DIR/start.js"; then
+    echo "Unexpected archive layout: start.js not found." >&2
+    exit 1
+fi
+
+# --- Set ownership ---
+
+if [ -n "$SUDO" ]; then
+    run_root chown -R "$(id -u):$(id -g)" "$STAGE_DIR"
+fi
+
+# --- Replace previous installation ---
+
+BACKUP_DIR="$(dirname "$INSTALL_DIR")/.smp-backup.$$"
+
+if [ -e "$INSTALL_DIR" ] || [ -L "$INSTALL_DIR" ]; then
+    echo "Backing up previous installation..."
+    run_root mv "$INSTALL_DIR" "$BACKUP_DIR"
+fi
+
+if ! run_root mv "$STAGE_DIR" "$INSTALL_DIR"; then
+    echo "Installation failed. Restoring previous installation..." >&2
+
+    if [ -e "$BACKUP_DIR" ] || [ -L "$BACKUP_DIR" ]; then
+        run_root mv "$BACKUP_DIR" "$INSTALL_DIR"
+    fi
+
+    exit 1
+fi
+
+STAGE_DIR=""
+
+# --- Remove backup ---
+
+if [ -e "$BACKUP_DIR" ] || [ -L "$BACKUP_DIR" ]; then
+    if ! run_root rm -rf "$BACKUP_DIR"; then
+        echo "Warning: could not remove previous installation backup." >&2
+    fi
+fi
+
+# --- Done ---
 
 echo ""
 echo "Installed SMP $VERSION to $INSTALL_DIR"
-echo "Run the panel in another terminal with: bun run $INSTALL_DIR/start.js"
+echo "Run the panel with:"
+echo "  bun run $INSTALL_DIR/start.js"
