@@ -1,6 +1,6 @@
 // SMP start.js - Starts the Bun server (API + static panel) and opens the browser
 import { spawn, execSync } from "child_process";
-import { existsSync, readdirSync } from "fs";
+import { existsSync, readdirSync, lstatSync, copyFileSync, renameSync, rmSync } from "fs";
 import path from "path";
 import net from "net";
 import { fileURLToPath } from "url";
@@ -39,6 +39,68 @@ function run(cmd, args, cwd, label) {
       resolve(1);
     });
   });
+}
+
+// Termux/PRoot (proot-distro) cannot create real hardlinks, so it emulates them
+// with symlinks into a hidden store. The kernel still hands the store path back
+// through /proc, so Bun resolves an installed file to something like
+// /.l2s/.l2s.bin.js0003.0002 and then fails to load its relative imports.
+// Installing with the copy backend and de-sharing existing hardlinks keeps
+// module resolution intact inside those guests.
+function usesProotLink2Symlink() {
+  if (process.platform !== "linux") return false;
+  return existsSync(process.env.PROOT_L2S_DIR || "/.l2s");
+}
+
+function installArgs() {
+  return usesProotLink2Symlink() ? ["install", "--backend=copyfile"] : ["install"];
+}
+
+function unshareHardlinks(dir) {
+  let fixed = 0;
+  const pending = [dir];
+  while (pending.length) {
+    const current = pending.pop();
+    let entries;
+    try { entries = readdirSync(current); } catch { continue; }
+    for (const name of entries) {
+      const target = path.join(current, name);
+      let st;
+      try { st = lstatSync(target); } catch { continue; }
+      // Real symlinks (package bin shims) are fine and must be left alone;
+      // link2symlink entries are masked as regular files with nlink > 1.
+      if (st.isSymbolicLink()) continue;
+      if (st.isDirectory()) { pending.push(target); continue; }
+      if (!st.isFile() || st.nlink <= 1) continue;
+      const tmp = `${target}.smp-unshare-${process.pid}`;
+      try {
+        copyFileSync(target, tmp);
+        try { renameSync(tmp, target); }
+        catch { rmSync(target, { force: true }); renameSync(tmp, target); }
+        fixed++;
+      } catch {
+        try { rmSync(tmp, { force: true }); } catch {}
+      }
+    }
+  }
+  return fixed;
+}
+
+async function ensureDependencies(dir, label) {
+  const nodeModules = path.join(dir, "node_modules");
+  const link2symlink = usesProotLink2Symlink();
+  const skipInstall = process.env.SMP_SKIP_INSTALL === "1";
+  const needsInstall = existsSync(nodeModules) ? link2symlink : !skipInstall;
+  if (needsInstall) {
+    console.log(`Installing ${label} dependencies...`);
+    const code = await run(bunCommand(), installArgs(), dir, `${label}-install`);
+    if (code !== 0) { console.error(`Could not install ${label} dependencies.`); process.exit(code); }
+  }
+  if (link2symlink && existsSync(nodeModules)) {
+    process.stdout.write(`Preparing ${label} dependencies for this environment...`);
+    const fixed = unshareHardlinks(nodeModules);
+    console.log(fixed ? ` done (${fixed} file${fixed === 1 ? "" : "s"}).` : " done.");
+  }
 }
 
 function isPortFree(port) {
@@ -132,14 +194,8 @@ async function askChoice(port, probe) {
     }
   }
 
-  if (process.env.SMP_SKIP_INSTALL !== "1" && !existsSync(path.join(serverDir, "node_modules"))) {
-    console.log("Installing server dependencies...");
-    await run(bunCommand(), ["install"], serverDir, "server-install");
-  }
-  if (process.env.SMP_SKIP_INSTALL !== "1" && !existsSync(path.join(webDir, "node_modules"))) {
-    console.log("Installing web dependencies...");
-    await run(bunCommand(), ["install"], webDir, "web-install");
-  }
+  await ensureDependencies(serverDir, "server");
+  await ensureDependencies(webDir, "web");
 
   if (process.env.SMP_SKIP_BUILD !== "1") {
     console.log("Building web app...");
