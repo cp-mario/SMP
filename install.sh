@@ -79,10 +79,7 @@ echo "  2) Experimental (pre-releases included)"
 
 CHANNEL_ANSWER=""
 
-if [ -t 0 ]; then
-    printf "Channel [1/stable, default 1]: "
-    IFS= read -r CHANNEL_ANSWER || CHANNEL_ANSWER=""
-elif [ -r /dev/tty ]; then
+if [ -r /dev/tty ] && [ -w /dev/tty ]; then
     printf "Channel [1/stable, default 1]: " >/dev/tty
     IFS= read -r CHANNEL_ANSWER </dev/tty || CHANNEL_ANSWER=""
 else
@@ -109,18 +106,36 @@ TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/smp-install.XXXXXX")"
 echo ""
 echo "Resolving latest $CHANNEL release..."
 
+
 if [ "$CHANNEL" = "experimental" ]; then
     curl -fsSL \
         "https://github.com/$REPO/releases.atom" \
         -o "$TMP_DIR/releases.atom"
 
-    # Extract the title from the first Atom entry.
     TAG="$(
-        sed ':a;N;$!ba;s/\n/ /g' "$TMP_DIR/releases.atom" |
-        sed -n 's/.*<entry>\(.*\)<\/entry>.*/\1/p' |
-        sed -n 's/.*<title>\([^<]*\)<\/title>.*/\1/p' |
-        head -n 1 |
-        tr -d '\r'
+        tr '\n' ' ' < "$TMP_DIR/releases.atom" |
+        awk '
+            {
+                start = index($0, "<entry>")
+                if (!start) exit 1
+
+                entry = substr($0, start + 7)
+                finish = index(entry, "</entry>")
+                if (!finish) exit 1
+
+                entry = substr(entry, 1, finish - 1)
+
+                title_start = index(entry, "<title>")
+                if (!title_start) exit 1
+
+                title = substr(entry, title_start + 7)
+                title_end = index(title, "</title>")
+                if (!title_end) exit 1
+
+                print substr(title, 1, title_end - 1)
+                exit
+            }
+        '
     )"
 else
     curl -fsSL \
@@ -134,6 +149,7 @@ else
         true
     )"
 fi
+
 
 if [ -z "$TAG" ]; then
     echo "Could not resolve the latest $CHANNEL release from GitHub." >&2
@@ -156,7 +172,7 @@ if ! curl -fLsS --retry 3 --retry-delay 1 \
     exit 1
 fi
 
-# --- Prepare installation directory ---
+# --- Root command helper ---
 
 run_root() {
     if [ -n "$SUDO" ]; then
@@ -165,6 +181,8 @@ run_root() {
         "$@"
     fi
 }
+
+# --- Prepare installation directory ---
 
 run_root mkdir -p "$(dirname "$INSTALL_DIR")"
 
