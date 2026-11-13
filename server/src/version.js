@@ -529,10 +529,17 @@ export async function applyUpdate({ target = "", current = "", channel = "stable
       }
 
       let unpacked;
+      let srcRoot;
       try {
         unpacked = join(stage, "unpacked");
+        srcRoot = unpacked;
         if (downloaded.ext === "zip") {
           new AdmZip(archivePath).extractAllTo(unpacked, true);
+          // GitHub zips wrap the tree in a SMP-<version> folder.
+          if (!existsSync(join(srcRoot, "package.json"))) {
+            const entry = readdirSync(unpacked).find((n) => n.startsWith("SMP-") && existsSync(join(unpacked, n, "package.json")));
+            if (entry) srcRoot = join(unpacked, entry);
+          }
         } else {
           await untar({ file: archivePath, cwd: unpacked, strip: 1 });
         }
@@ -540,17 +547,17 @@ export async function applyUpdate({ target = "", current = "", channel = "stable
         return fail(steps, "install", "EXTRACT_FAILED", `Could not unpack the source archive: ${e?.message || e}`);
       }
 
-      if (!existsSync(join(unpacked, "package.json"))) {
+      if (!existsSync(join(srcRoot, "package.json"))) {
         return fail(steps, "install", "NO_SOURCE", "The archive does not look like an SMP source tree.");
       }
 
       // Copy the whole project tree over the installation directory.
       setStep(steps, "install", "pending");
       try {
-        cpSync(join(unpacked, "package.json"), join(ROOT_DIR, "package.json"));
-        for (const name of readdirSync(unpacked)) {
+        cpSync(join(srcRoot, "package.json"), join(ROOT_DIR, "package.json"));
+        for (const name of readdirSync(srcRoot)) {
           if (name === "package.json") continue;
-          cpSync(join(unpacked, name), join(ROOT_DIR, name), { recursive: true, force: true });
+          cpSync(join(srcRoot, name), join(ROOT_DIR, name), { recursive: true, force: true });
         }
       } catch (e) {
         return fail(steps, "install", "INSTALL_FAILED", `Could not replace the installation files in ${ROOT_DIR}: ${e?.message || e}`);
