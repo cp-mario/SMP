@@ -53,8 +53,8 @@ export class FabricLoader extends BaseLoader {
       // fallback: combined endpoint
       const all = await tryFetchJson(`${META}/versions`);
       if (all?.__error || !all?.game) {
-        const msg = mc?.__error?.message || all?.__error?.message || "sin respuesta";
-        throw new Error(`No se pudieron cargar versiones de Minecraft para Fabric (meta.fabricmc.net): ${msg}`);
+        const msg = mc?.__error?.message || all?.__error?.message || "no response";
+        throw new Error(`Could not load Minecraft versions for Fabric (meta.fabricmc.net): ${msg}`);
       }
       mc = all.game;
     }
@@ -63,15 +63,15 @@ export class FabricLoader extends BaseLoader {
       stable: !!v?.stable,
       channel: v?.stable ? "stable" : "experimental",
     })).filter((v) => v.id);
-    if (!list.length) throw new Error("Fabric Meta devolvió una lista de versiones de Minecraft vacía.");
+    if (!list.length) throw new Error("Fabric Meta returned an empty list of Minecraft versions.");
     return list;
   }
 
   async getLoaderVersions(version) {
     let loaders = await tryFetchJson(`${META}/versions/loader/${encodeURIComponent(version)}`);
     if (loaders?.__error || !Array.isArray(loaders)) {
-      const msg = loaders?.__error?.message || "respuesta inválida";
-      throw new Error(`No se pudieron cargar versiones de Fabric Loader para ${version}: ${msg}`);
+      const msg = loaders?.__error?.message || "invalid response";
+      throw new Error(`Could not load Fabric Loader versions for ${version}: ${msg}`);
     }
     const list = loaders.map((e) => {
       const v = e?.loader?.version || e?.version;
@@ -83,7 +83,7 @@ export class FabricLoader extends BaseLoader {
     // The Meta API already returns loader builds newest-first. Do NOT sort by the
     // `build` field: newer loader lines restart build numbering (e.g. 0.20.1 = build 1
     // while the legacy 0.10.6+build.214 has a much higher number).
-    if (!list.length) throw new Error(`Fabric Meta no devolvió versiones de Fabric Loader para ${version}.`);
+    if (!list.length) throw new Error(`Fabric Meta returned no Fabric Loader versions for ${version}.`);
     return list;
   }
 
@@ -91,7 +91,7 @@ export class FabricLoader extends BaseLoader {
     if (requestedLoaderVersion) return String(requestedLoaderVersion).trim();
     const loaders = await this.getLoaderVersions(version);
     const pick = loaders.find((e) => e.stable) || loaders[0];
-    if (!pick?.id) throw new Error(`No se encontró versión de Fabric Loader para Minecraft ${version}`);
+    if (!pick?.id) throw new Error(`No Fabric Loader version found for Minecraft ${version}`);
     return String(pick.id);
   }
 

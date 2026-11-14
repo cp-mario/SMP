@@ -141,8 +141,8 @@
   });
   const portDirty = $derived(editablePorts.some((p) => String(portEdits[p.role] ?? p.port) !== String(p.port)));
   const portHelp = $derived((isBedrock || isEndstone) ? {
-    game: "Jugadores por IPv4 (server-port, UDP)",
-    game_v6: "Jugadores por IPv6 (server-portv6, UDP)",
+    game: "Players over IPv4 (server-port, UDP)",
+    game_v6: "Players over IPv6 (server-portv6, UDP)",
   } : {
     game: "Player connections (Java: server-port, TCP 25565)",
     query: "Server list / monitoring query (UDP; follows the game port by default)",

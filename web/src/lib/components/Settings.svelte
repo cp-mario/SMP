@@ -437,7 +437,7 @@
 </Panel>
 
 <footer class="legal-note">
-  Minecraft es una marca registrada de Mojang Studios AB. SMP es un proyecto independiente y no está afiliado, patrocinado ni respaldado por Mojang Studios, ni Microsoft.
+  Minecraft is a registered trademark of Mojang Studios AB. SMP is an independent project and is not affiliated with, sponsored by or endorsed by Mojang Studios, nor Microsoft.
 </footer>
 </div>
 

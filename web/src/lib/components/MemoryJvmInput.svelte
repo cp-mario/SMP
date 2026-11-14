@@ -116,7 +116,7 @@
       placeholder="8448"
       {disabled}
       label="Exact MB"
-      hint={hint || `Mín ${lo} MB, máx ${formatGb(hi)} (${hi} MB).`}
+      hint={hint || `Min ${lo} MB, max ${formatGb(hi)} (${hi} MB).`}
       oninput={(e) => onText(e.currentTarget.value)}
       onblur={() => { const parsed = parseMb(text); valueMb = parsed ?? (clampMb(valueMb) ?? lo); text = formatMb(valueMb); lastPushed = valueMb; }}
       onkeydown={(e) => { if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); } }}
@@ -130,7 +130,7 @@
       monospace
       placeholder="-XX:+UseG1GC -Dfile.encoding=UTF-8"
       {disabled}
-      hint="Se aplican al iniciar el servidor."
+      hint="Applied when the server starts."
     />
   {/if}
 </div>

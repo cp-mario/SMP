@@ -7,7 +7,7 @@ import { readFileSync } from "fs";
  *
  * Uses the compiled helper module plus a jsdom rendering of the same markup the
  * component produces, so we assert on the actual filter/selection behaviour
- * (click "Latest experimental" -> filter resets to Todos -> that version is selected).
+ * (click "Latest experimental" -> filter resets to All -> that version is selected).
  */
 
 let dom;
@@ -62,15 +62,15 @@ function createPicker({ versions = MC, meta = META } = {}) {
     document.querySelector("#app").innerHTML = `
       <div class="field-block">
         <div class="segmented" role="group">
-          ${[["all", "Todos"], ["stable", "Estables"], ["experimental", "Experimentales"]]
+          ${[["all", "All"], ["stable", "Stable"], ["experimental", "Experimental"]]
             .map(([v, l]) => `<button type="button" class="segment ${state.channel === v ? "selected" : ""}" data-channel="${v}">${l}</button>`)
             .join("")}
         </div>
         <div class="row-actions">
-          <button type="button" class="latest" data-want="stable">Latest estable${meta.latest?.stable ? ` (${meta.latest.stable})` : ""}</button>
+          <button type="button" class="latest" data-want="stable">Latest stable${meta.latest?.stable ? ` (${meta.latest.stable})` : ""}</button>
           <button type="button" class="latest" data-want="experimental">Latest experimental${meta.latest?.experimental ? ` (${meta.latest.experimental})` : ""}</button>
         </div>
-        <span class="version-count">${visible().length} versión(es)${state.channel !== "all" ? ` · ${state.channel}` : ""}</span>
+        <span class="version-count">${visible().length} version(s)${state.channel !== "all" ? ` · ${state.channel}` : ""}</span>
         <div class="pill-list scrollable">
           ${visible().map((v) => `<button type="button" class="pill ${state.selected === v.id ? "selected" : ""}" data-version="${v.id}">${v.id}${v.stable === false ? " <span class='muted'>(experimental)</span>" : ""}</button>`).join("")}
         </div>
@@ -86,7 +86,7 @@ function createPicker({ versions = MC, meta = META } = {}) {
   }
 
   function pickLatest(want) {
-    state.channel = "all"; // reset to Todos
+    state.channel = "all"; // reset to All
     const key = want === "experimental" ? "experimental" : "stable";
     state.selected = meta.latest?.[key] || visible().find((v) => (key === "experimental" ? v.stable === false : v.stable !== false))?.id || null;
     render();
@@ -103,14 +103,14 @@ function createPicker({ versions = MC, meta = META } = {}) {
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
 
-test("renders every version with the Todos filter", () => {
+test("renders every version with the All filter", () => {
   const p = createPicker();
   p.render();
   expect($$(".pill").length).toBe(4);
-  expect($(".version-count").textContent).toContain("4 versión(es)");
+  expect($(".version-count").textContent).toContain("4 version(s)");
 });
 
-test("Estables filters to stable builds only", () => {
+test("Stable filters to stable builds only", () => {
   const p = createPicker();
   p.render();
   $$(".segment").find((b) => b.dataset.channel === "stable").click();
@@ -120,7 +120,7 @@ test("Estables filters to stable builds only", () => {
   expect($(".version-count").textContent).toContain("· stable");
 });
 
-test("Experimentales filters to experimental builds only", () => {
+test("Experimental filters to experimental builds only", () => {
   const p = createPicker();
   p.render();
   p.setChannel("experimental");
@@ -128,7 +128,7 @@ test("Experimentales filters to experimental builds only", () => {
   expect(ids).toEqual(["26.3-rc-3", "26.4-snapshot-8"]);
 });
 
-test("Latest experimental resets the filter to Todos and selects the experimental version", () => {
+test("Latest experimental resets the filter to All and selects the experimental version", () => {
   const p = createPicker();
   p.render();
   p.setChannel("stable");
@@ -137,13 +137,13 @@ test("Latest experimental resets the filter to Todos and selects the experimenta
   p.pickLatest("experimental");
 
   const activeSegment = $(".segment.selected");
-  expect(activeSegment.dataset.channel).toBe("all"); // filter back to Todos
+  expect(activeSegment.dataset.channel).toBe("all"); // filter back to All
   expect(p.state.selected).toBe("26.4-snapshot-8");
   expect($(".pill.selected").dataset.version).toBe("26.4-snapshot-8");
   expect($$(".pill").length).toBe(4); // the selected version is visible
 });
 
-test("Latest estable resets the filter to Todos and selects the stable version", () => {
+test("Latest stable resets the filter to All and selects the stable version", () => {
   const p = createPicker();
   p.render();
   p.setChannel("experimental");
@@ -185,15 +185,15 @@ test("switching the filter reuses the cached list (no refetch, no UI reload)", (
   expect(calls).toBe(0); // filtering never triggers a network call
   expect(before).toBe(4);
   expect(afterStable).toBe(2);
-  expect($$(".pill").length).toBe(4); // back to Todos without a reload
+  expect($$(".pill").length).toBe(4); // back to All without a reload
 });
 
 test("component source uses the shared helpers and resets the channel on Latest", () => {
   const src = readFileSync(new URL("../src/lib/components/CreateServer.svelte", import.meta.url), "utf8");
   expect(src).toContain('filterByChannel as filterVersions');
   expect(src).toContain('filterBuilds');
-  expect(src).toContain('value: "all", label: "Todos"');
-  expect(src).toContain('Latest estable');
+  expect(src).toContain('value: "all", label: "All"');
+  expect(src).toContain('Latest stable');
   expect(src).toContain('Latest experimental');
 
   const appSrc = readFileSync(new URL("../src/App.svelte", import.meta.url), "utf8");

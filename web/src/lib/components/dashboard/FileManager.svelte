@@ -453,11 +453,11 @@
 
   <div class="fm-list" role="region" oncontextmenu={(e) => openContext(e, null)}>
     {#if loading && files.length === 0}
-      <div class="fm-state"><Spinner label="Cargando archivos…" /></div>
+      <div class="fm-state"><Spinner label="Loading files…" /></div>
     {:else if error && files.length === 0}
-      <Alert tone="danger" title="No se pudo listar">{error} <Button size="xs" variant="outline" onclick={loadDir}>Reintentar</Button></Alert>
+      <Alert tone="danger" title="Could not list">{error} <Button size="xs" variant="outline" onclick={loadDir}>Retry</Button></Alert>
     {:else if sortedFiles.length === 0}
-      <EmptyState icon="folder" title={search ? "Sin resultados" : "Carpeta vacía"} description={search ? "Prueba otra búsqueda." : "Sube archivos o crea una carpeta."} />
+      <EmptyState icon="folder" title={search ? "No results" : "Empty folder"} description={search ? "Try another search." : "Upload files or create a folder."} />
     {:else}
       <div class="fm-head">
         <span>Name</span><span>Size</span><span>Modified</span><span></span>

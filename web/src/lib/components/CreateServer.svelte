@@ -132,7 +132,7 @@
     const localErrors = {};
     for (const e of entries) {
       const n = Number(e.raw);
-      if (!Number.isInteger(n) || n < 1 || n > 65535) localErrors[e.role] = "Introduce un puerto entre 1 y 65535.";
+      if (!Number.isInteger(n) || n < 1 || n > 65535) localErrors[e.role] = "Enter a port between 1 and 65535.";
     }
     const byPort = new Map();
     for (const e of entries) {
@@ -144,7 +144,7 @@
     }
     for (const roles of byPort.values()) {
       if (roles.length < 2) continue;
-      for (const role of roles) localErrors[role] = "Ese puerto ya está usado por otro campo.";
+      for (const role of roles) localErrors[role] = "That port is already used by another field.";
     }
     if (Object.keys(localErrors).length) {
       portErrors = localErrors;
@@ -165,20 +165,20 @@
       const next = {};
       for (const r of results) {
         if (r.error) {
-          next[r.role] = "No se pudo comprobar la disponibilidad. Inténtalo de nuevo.";
+          next[r.role] = "Could not check availability. Please try again.";
           continue;
         }
         if (r.res?.available) continue;
         const proto = String(r.res?.protocol || "").toUpperCase();
         const ownerName = r.res?.server?.name;
         const reason = ownerName
-          ? `ocupado por "${ownerName}"`
+          ? `in use by "${ownerName}"`
           : r.res?.reason === "system"
-            ? "ocupado por otro proceso"
+            ? "in use by another process"
             : r.res?.reason === "server"
-              ? "ya reservado por otro servidor"
-              : "no disponible";
-        next[r.role] = `Puerto ${r.res?.port ?? ""}/${proto} ${reason}.`;
+              ? "already reserved by another server"
+              : "unavailable";
+        next[r.role] = `Port ${r.res?.port ?? ""}/${proto} ${reason}.`;
       }
       portErrors = next;
       portsChecked = true;
@@ -260,14 +260,14 @@
           <div class="section-head">
             <span class="step-badge">1</span>
             <div>
-              <div class="section-title">Nombre del servidor</div>
-              <div class="section-sub">Así aparecerá en el panel y en la lista de instancias.</div>
+              <div class="section-title">Server name</div>
+              <div class="section-sub">This is how it will appear in the panel and the instances list.</div>
             </div>
           </div>
           <TextField
             bind:value={createName}
-            label="Nombre del servidor"
-            placeholder="p. ej. Survival"
+            label="Server name"
+            placeholder="e.g. Survival"
             oninput={onName}
             autofocus
           />
@@ -278,7 +278,7 @@
             <span class="step-badge">2</span>
             <div>
               <div class="section-title">Loader</div>
-              <div class="section-sub">Elige el motor que ejecutará tu servidor.</div>
+              <div class="section-sub">Choose the engine that will run your server.</div>
             </div>
           </div>
           <div class="pill-list">
@@ -287,19 +287,19 @@
                 class="pill"
                 class:selected={selectedLoader === l.id}
                 type="button"
-                title={l.custom ? "Loader personalizado" : (l.java ? "Java / JVM configurable" : "Sin ajustes de RAM / JVM")}
+                title={l.custom ? "Custom loader" : (l.java ? "Java / JVM configurable" : "No RAM / JVM settings")}
                 onclick={() => onSelectLoader?.(l.id)}
-              >{l.name}{#if l.custom}<span class="muted"> (personalizado)</span>{/if}</button>
+              >{l.name}{#if l.custom}<span class="muted"> (custom)</span>{/if}</button>
             {/each}
           </div>
           {#if loaderMeta}
             <div class="muted loader-note">
-              {#if loaderMeta.eula === false}<span>No requiere aceptar la EULA de Minecraft.</span>{/if}
-              {#if loaderMeta.custom}<span>Loader personalizado: sube o coloca los archivos del servidor y configura el comando de arranque.</span>{/if}
-              {#if loaderMeta.type === "bedrock"}<span>Bedrock: el binario dedicado se descarga y extrae automáticamente.</span>{/if}
-              {#if loaderMeta.id === "endstone"}<span>Endstone: bundle oficial con launcher Python; BDS se descarga en el primer arranque.</span>{/if}
-              {#if loaderMeta.type === "native" && loaderMeta.id !== "endstone"}<span>Binario nativo: se descarga el ejecutable de tu plataforma.</span>{/if}
-              {#if loaderMeta.java === false && !loaderMeta.custom && loaderMeta.type !== "bedrock" && loaderMeta.type !== "native"}<span>Este loader no expone ajustes de RAM/JVM.</span>{/if}
+              {#if loaderMeta.eula === false}<span>Does not require accepting the Minecraft EULA.</span>{/if}
+              {#if loaderMeta.custom}<span>Custom loader: upload or place the server files and configure the start command.</span>{/if}
+              {#if loaderMeta.type === "bedrock"}<span>Bedrock: the dedicated binary is downloaded and extracted automatically.</span>{/if}
+              {#if loaderMeta.id === "endstone"}<span>Endstone: official bundle with a Python launcher; BDS is downloaded on first startup.</span>{/if}
+              {#if loaderMeta.type === "native" && loaderMeta.id !== "endstone"}<span>Native binary: the executable for your platform is downloaded.</span>{/if}
+              {#if loaderMeta.java === false && !loaderMeta.custom && loaderMeta.type !== "bedrock" && loaderMeta.type !== "native"}<span>This loader does not expose RAM/JVM settings.</span>{/if}
             </div>
           {/if}
         </section>
@@ -309,8 +309,8 @@
             <div class="section-head">
               <span class="step-badge">P</span>
               <div>
-                <div class="section-title">Puertos</div>
-                <div class="section-sub">Puedes dejarlos como están o buscar un hueco libre para todos.</div>
+                <div class="section-title">Ports</div>
+                <div class="section-sub">You can leave them as they are or find a free slot for all of them.</div>
               </div>
             </div>
             <div class="port-create-grid">
@@ -323,19 +323,19 @@
                   max="65535"
                   disabled={portsBusy || createLoading}
                   error={portErrors[p.role] || ""}
-                  hint={portsChecking ? "Comprobando disponibilidad…" : p.role === "game" ? "Conexión principal" : ""}
+                  hint={portsChecking ? "Checking availability…" : p.role === "game" ? "Primary connection" : ""}
                   oninput={(e) => { portValues[p.role] = e.currentTarget.value; }}
                 />
               {/each}
             </div>
             <div class="row-actions">
-              <Button size="xs" variant="outline" loading={portsBusy} disabled={!selectedLoader || createLoading} onclick={autoPorts}><Icon name="refresh" size={12} /> Buscar puertos libres</Button>
+              <Button size="xs" variant="outline" loading={portsBusy} disabled={!selectedLoader || createLoading} onclick={autoPorts}><Icon name="refresh" size={12} /> Find free ports</Button>
             </div>
             <div class="muted port-note">
               {#if portsChecking}
-                Comprobando disponibilidad de los puertos…
+                Checking port availability…
               {:else}
-                Los puertos ocupados se marcan en rojo. Usa «Buscar puertos libres» o introduce uno disponible para poder crear el servidor.
+                Occupied ports are marked in red. Use "Find free ports" or enter an available one to be able to create the server.
               {/if}
             </div>
           </section>
@@ -346,22 +346,22 @@
             <div class="section-head">
               <span class="step-badge">3</span>
               <div>
-                <div class="section-title">Versión de Minecraft</div>
-                <div class="section-sub">Filtra por canal y elige la versión exacta.</div>
+                <div class="section-title">Minecraft version</div>
+                <div class="section-sub">Filter by channel and choose the exact version.</div>
               </div>
             </div>
             <Segmented
               bind:value={versionChannel}
               size="sm"
               options={[
-                { value: "all", label: "Todos" },
-                { value: "stable", label: "Estables" },
-                { value: "experimental", label: "Experimentales" },
+                { value: "all", label: "All" },
+                { value: "stable", label: "Stable" },
+                { value: "experimental", label: "Experimental" },
               ]}
               onchange={(v) => changeVersionChannel(v)}
             />
             <div class="row-actions">
-              <Button size="xs" variant="outline" disabled={!selectedLoader || versionsLoading} onclick={() => onPickLatest?.("stable")}>Latest estable{latestStable ? ` (${latestStable})` : ""}</Button>
+              <Button size="xs" variant="outline" disabled={!selectedLoader || versionsLoading} onclick={() => onPickLatest?.("stable")}>Latest stable{latestStable ? ` (${latestStable})` : ""}</Button>
               <Button size="xs" variant="outline" disabled={!selectedLoader || versionsLoading || !latestExp} onclick={() => onPickLatest?.("experimental")}>Latest experimental{latestExp ? ` (${latestExp})` : ""}</Button>
             </div>
           </section>
@@ -369,18 +369,18 @@
 
         {#if !loaderMeta?.custom}
           {#if !selectedLoader}
-            <Alert tone="info">Selecciona un loader primero.</Alert>
+            <Alert tone="info">Select a loader first.</Alert>
           {:else}
             <div class="version-panel">
               <div class="version-head">
                 <span class="muted version-count">
-                  {filteredVersions.length} versión(es){versionChannel !== "all" ? ` · ${versionChannel}` : ""}
+                  {filteredVersions.length} version(s){versionChannel !== "all" ? ` · ${versionChannel}` : ""}
                 </span>
                 {#if versionsLoading}<Spinner size={13} label="" />{/if}
               </div>
               <SearchInput
                 value={versionsSearch}
-                placeholder="Buscar versión…"
+                placeholder="Search version…"
                 oninput={(e) => onSearchVersions?.(e.currentTarget.value)}
               />
               <div class="pill-list scrollable" bind:this={versionListEl}>
@@ -404,9 +404,9 @@
             </div>
           {/if}
         {:else}
-          <Alert tone="info" title="Loader personalizado">
-            No hace falta elegir versión ni puertos. Crea el servidor y después sube tus archivos, ajusta el comando de inicio y añade los puertos, mods y ajustes que quieras desde la página del servidor.
-          </Alert>
+            <Alert tone="info" title="Custom loader">
+              No need to choose a version or ports. Create the server and then upload your files, adjust the start command and add the ports, mods and settings you want from the server page.
+            </Alert>
         {/if}
 
         {#if !loaderMeta?.custom && (loaderBuildsSupported || loaderBuildsLoading)}
@@ -415,25 +415,25 @@
               <span class="step-badge">4</span>
               <div>
                 <div class="section-title">{loaderMeta?.name || "Loader"} build</div>
-                <div class="section-sub">Build del loader para {selectedVersion || "esta versión"}. Se selecciona el más reciente por defecto.</div>
+                <div class="section-sub">Loader build for {selectedVersion || "this version"}. The most recent is selected by default.</div>
               </div>
             </div>
             <Segmented
               bind:value={loaderBuildChannel}
               size="sm"
               options={[
-                { value: "all", label: "Todos" },
-                { value: "stable", label: "Estables" },
-                { value: "experimental", label: "Experimentales" },
+                { value: "all", label: "All" },
+                { value: "stable", label: "Stable" },
+                { value: "experimental", label: "Experimental" },
               ]}
               onchange={(v) => onLoaderBuildChannel?.(v)}
             />
             <div class="row-actions">
-              <Button size="xs" variant="outline" disabled={!selectedVersion || loaderBuildsLoading} onclick={() => onPickLatestLoaderBuild?.("stable")}>Latest estable{loaderBuildLatestStable ? ` (${loaderBuildLatestStable})` : ""}</Button>
+              <Button size="xs" variant="outline" disabled={!selectedVersion || loaderBuildsLoading} onclick={() => onPickLatestLoaderBuild?.("stable")}>Latest stable{loaderBuildLatestStable ? ` (${loaderBuildLatestStable})` : ""}</Button>
               <Button size="xs" variant="outline" disabled={!selectedVersion || loaderBuildsLoading || !loaderBuildLatestExp} onclick={() => onPickLatestLoaderBuild?.("experimental")}>Latest experimental{loaderBuildLatestExp ? ` (${loaderBuildLatestExp})` : ""}</Button>
             </div>
             {#if loaderBuildsLoading}
-              <div class="loading-box"><span class="spinner"></span><span class="muted">Cargando builds…</span></div>
+              <div class="loading-box"><span class="spinner"></span><span class="muted">Loading builds…</span></div>
             {:else}
               <div class="pill-list scrollable" bind:this={buildListEl}>
                 {#each filteredLoaderBuilds as b}
@@ -449,7 +449,7 @@
                     onclick={() => onSelectLoaderBuild?.(bid)}
                   >{bid}{#if bch !== "stable"}<span class="muted"> (experimental)</span>{/if}</button>
                 {:else}
-                  <div class="pill muted">{loaderBuildsError ? `Error: ${loaderBuildsError}` : "No hay builds de loader"}</div>
+                  <div class="pill muted">{loaderBuildsError ? `Error: ${loaderBuildsError}` : "No loader builds"}</div>
                 {/each}
               </div>
             {/if}
@@ -462,7 +462,7 @@
               <span class="step-badge">5</span>
               <div>
                 <div class="section-title">Java runtime</div>
-                <div class="section-sub">Runtimes detectados o instalados por el panel. Instala más en <b>Settings → Java</b>.</div>
+                <div class="section-sub">Runtimes detected or installed by the panel. Install more in <b>Settings → Java</b>.</div>
               </div>
             </div>
             <div class="pill-list">
@@ -475,7 +475,7 @@
                   onclick={() => onSelectJava?.(j.id)}
                 >{j.name}{#if j.source === "managed"}<span class="muted"> · managed</span>{:else if j.detected || j.source === "system"}<span class="muted"> · detected</span>{/if}</button>
               {:else}
-                <div class="pill muted">No hay Java detectado. Instala uno en Settings → Java.</div>
+                <div class="pill muted">No Java detected. Install one in Settings → Java.</div>
               {/each}
             </div>
           </section>
@@ -487,23 +487,23 @@
               <span class="step-badge">6</span>
               <div>
                 <div class="section-title">Memoria y JVM</div>
-                <div class="section-sub">Ajusta la RAM y los argumentos de arranque.</div>
+                <div class="section-sub">Adjust the RAM and startup arguments.</div>
               </div>
             </div>
             <MemoryJvmInput bind:valueMb={memoryMb} bind:jvmArgs={jvmArgs} maxMb={maxRamMb} minMb={256} stepMb={512} />
           </section>
         {:else if showJvmPanel}
-          <Alert tone="info">La RAM / JVM no son configurables para este loader.</Alert>
+          <Alert tone="info">RAM / JVM are not configurable for this loader.</Alert>
         {/if}
       </div>
 
       <aside class="create-summary">
-        <div class="summary-head"><Icon name="sparkles" size={15} /> Resumen</div>
+        <div class="summary-head"><Icon name="sparkles" size={15} /> Summary</div>
         <div class="summary-list">
-          <div class="summary-row"><span>Nombre</span><b>{createName?.trim() || "—"}</b></div>
+          <div class="summary-row"><span>Name</span><b>{createName?.trim() || "—"}</b></div>
           <div class="summary-row"><span>Loader</span><b>{loaderMeta?.name || "—"}</b></div>
           {#if !isCustomLoader}
-            <div class="summary-row"><span>Versión</span><b>{selectedVersion || "—"}</b></div>
+            <div class="summary-row"><span>Version</span><b>{selectedVersion || "—"}</b></div>
           {/if}
           {#if loaderBuildsSupported}
             <div class="summary-row"><span>Build</span><b>{selectedLoaderBuild || "—"}</b></div>
@@ -515,21 +515,21 @@
             <div class="summary-row"><span>RAM</span><b>{memoryMb} MB</b></div>
           {/if}
         </div>
-        <div class="summary-note"><Icon name="info" size={13} /> Podrás cambiar estos ajustes después.</div>
+        <div class="summary-note"><Icon name="info" size={13} /> You can change these settings later.</div>
       </aside>
     </div>
   {/snippet}
 
   {#snippet footer()}
-    <Button size="sm" variant="outline" disabled={createLoading} onclick={close}>Cancelar</Button>
-    <Button size="sm" variant="outline" disabled={createLoading} onclick={() => onOpenModpack?.()}><Icon name="package" size={13} /> Desde modpack</Button>
+    <Button size="sm" variant="outline" disabled={createLoading} onclick={close}>Cancel</Button>
+    <Button size="sm" variant="outline" disabled={createLoading} onclick={() => onOpenModpack?.()}><Icon name="package" size={13} /> From modpack</Button>
     <Button
       size="sm"
       variant="primary"
       loading={createLoading}
       disabled={!canCreate}
       onclick={() => onCreate?.({ ...(supportsJvm ? { memoryMax: `${memoryMb}M`, jvmArgs } : {}), ports: requestedPorts() })}
-    ><Icon name="plus" size={13} /> Crear servidor</Button>
+    ><Icon name="plus" size={13} /> Create server</Button>
   {/snippet}
 </Modal>
 

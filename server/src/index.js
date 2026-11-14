@@ -1529,8 +1529,8 @@ function buildUpdateInfo(row, items) {
     if (newer) {
       out.recommended = latestSame;
       out.recommendation = installedChannel === "experimental"
-        ? `Nueva versión experimental disponible: ${latestSame}`
-        : `Nueva versión estable disponible: ${latestSame}`;
+        ? `New experimental version available: ${latestSame}`
+        : `New stable version available: ${latestSame}`;
     }
   }
   return out;
@@ -1600,8 +1600,8 @@ async function getLoaderBuildUpdateInfo(row, { force = false } = {}) {
     latest,
     recommended: latest,
     recommendation: installed
-      ? `Nuevo build disponible: ${latest}`
-      : `Build instalado no registrado; último disponible: ${latest}`,
+      ? `New build available: ${latest}`
+      : `Installed build not registered; latest available: ${latest}`,
     channel,
   };
 }
@@ -2444,8 +2444,8 @@ export const javaRoute = new Elysia({ prefix: "/api/java" })
     const installedIds = new Set(installed.map(i => String(i.id)));
     const available = AVAILABLE_JAVA_VERSIONS.map(v => ({ ...v, installed: installedIds.has(String(v.id)), managed: true }));
     const runtimes = [
-      { id: "system", name: "Java del sistema (PATH/JAVA_HOME)", source: "system", installed: detected.some(d => d.source === "path" || d.source === "JAVA_HOME") },
-      ...installed.map(i => ({ id: i.id, name: "Java " + i.id + " (instalado en carpeta java)", source: "managed", installed: true, path: i.path, home: i.home })),
+      { id: "system", name: "System Java (PATH/JAVA_HOME)", source: "system", installed: detected.some(d => d.source === "path" || d.source === "JAVA_HOME") },
+      ...installed.map(i => ({ id: i.id, name: "Java " + i.id + " (installed in java folder)", source: "managed", installed: true, path: i.path, home: i.home })),
       ...detected.filter(d => !d.managed).map(d => ({ id: d.path, name: d.name + (d.version ? " — " + d.version : ""), source: d.source, installed: true, path: d.path, version: d.version, detected: true })),
     ];
     const seen = new Set();
@@ -2455,8 +2455,8 @@ export const javaRoute = new Elysia({ prefix: "/api/java" })
   .get("/runtimes", async () => {
     const [detected, installed] = await Promise.all([detectJava(JAVA_DIR).catch(() => []), Promise.resolve(listInstalledJava(JAVA_DIR))]);
     const runtimes = [
-      { id: "system", name: "Java del sistema (PATH/JAVA_HOME)", source: "system" },
-      ...installed.map(i => ({ id: i.id, name: "Java " + i.id + " (instalado en carpeta java)", source: "managed", path: i.path })),
+      { id: "system", name: "System Java (PATH/JAVA_HOME)", source: "system" },
+      ...installed.map(i => ({ id: i.id, name: "Java " + i.id + " (installed in java folder)", source: "managed", path: i.path })),
       ...detected.filter(d => !d.managed).map(d => ({ id: d.path, name: d.name + (d.version ? " — " + d.version : ""), source: d.source, path: d.path, version: d.version })),
     ];
     const seen = new Set();
@@ -2468,7 +2468,7 @@ export const javaRoute = new Elysia({ prefix: "/api/java" })
   })
   .post("/install", async ({ body, set }) => {
     const version = String(body?.version || body?.id || "").trim();
-    if (!/^\d+$/.test(version)) { set.status = 400; return { ok: false, error: "Especifica una versión mayor válida (ej. 21)" }; }
+    if (!/^\d+$/.test(version)) { set.status = 400; return { ok: false, error: "Specify a valid major version (e.g. 21)" }; }
     try {
       const res = await installJava(JAVA_DIR, version);
       const [detected, installed] = await Promise.all([detectJava(JAVA_DIR).catch(() => []), Promise.resolve(listInstalledJava(JAVA_DIR))]);

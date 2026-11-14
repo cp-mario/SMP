@@ -283,7 +283,7 @@
   /**
    * Loads the Minecraft version list for `loaderId`.
    *
-   * The list is always fetched with `channel: "all"` (the "Todos" filter) and filtered in the
+   * The list is always fetched with `channel: "all"` (the "All" filter) and filtered in the
    * client, so "Latest stable/experimental" can select a version that the current filter would
    * hide, and switching All/Stable/Experimental never refetches (no UI jump / no reload flash).
    */
@@ -325,7 +325,7 @@
   }
 
   /**
-   * "Latest estable / experimental": reset the filter to "Todos" and select the requested build.
+   * "Latest stable / experimental": reset the filter to "All" and select the requested build.
    *
    * The list is already loaded (channel "all"), so this only resolves and selects — no network
    * call and no loading flag, which means no modal repaint / flicker. The component scrolls the
@@ -346,7 +346,7 @@
       appState.selectedVersionChannel = want;
       await loadLoaderBuilds(loaderId, pick);
     } else {
-      toasts.warning(`No hay versión ${want === "experimental" ? "experimental" : "estable"} para este loader`);
+      toasts.warning(`No ${want === "experimental" ? "experimental" : "stable"} version for this loader`);
     }
   }
 
@@ -377,7 +377,7 @@
     appState.selectedLoaderBuild = reconcileSelection(appState.loaderBuilds, channel, appState.selectedLoaderBuild);
   }
 
-  /** "Latest estable / experimental" of a loader build: reset the filter to Todos and select it. */
+  /** "Latest stable / experimental" of a loader build: reset the filter to All and select it. */
   async function handlePickLatestLoaderBuild(channel = "stable") {
     const loaderId = appState.selectedLoader;
     const mcVersion = appState.selectedVersion;

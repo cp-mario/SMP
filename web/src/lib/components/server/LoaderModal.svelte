@@ -252,24 +252,24 @@
           bind:value={loaderForm.channel}
           size="sm"
           options={[
-            { value: "all", label: "Todos" },
-            { value: "stable", label: "Estables" },
-            { value: "experimental", label: "Experimentales" },
+            { value: "all", label: "All" },
+            { value: "stable", label: "Stable" },
+            { value: "experimental", label: "Experimental" },
           ]}
         />
         <div class="row-actions">
-          <Button size="xs" variant="outline" disabled={!loaderForm.loader || versionsLoading} onclick={() => pickLatestChannel("stable")}>Latest estable{loaderLatest?.stable ? ` (${loaderLatest.stable})` : ""}</Button>
+          <Button size="xs" variant="outline" disabled={!loaderForm.loader || versionsLoading} onclick={() => pickLatestChannel("stable")}>Latest stable{loaderLatest?.stable ? ` (${loaderLatest.stable})` : ""}</Button>
           <Button size="xs" variant="outline" disabled={!loaderForm.loader || versionsLoading || !loaderLatest?.experimental} onclick={() => pickLatestChannel("experimental")}>Latest experimental{loaderLatest?.experimental ? ` (${loaderLatest.experimental})` : ""}</Button>
         </div>
       </div>
 
       <div class="field-block">
-        <span class="label">Versión de Minecraft</span>
+        <span class="label">Minecraft version</span>
         {#if versionsLoading}
-          <Spinner label="Cargando versiones…" />
+          <Spinner label="Loading versions…" />
         {:else}
           <Select bind:value={loaderForm.version} disabled={loaderBusy || !loaderForm.loader} onchange={onLoaderVersionChange}>
-            <option value="">Selecciona una versión…</option>
+            <option value="">Select a version…</option>
             {#each filteredModalVersions as v}<option value={vId(v)}>{vId(v)}{vCh(v) !== "stable" ? " (experimental)" : ""}</option>{/each}
           </Select>
           {#if versionsError}<Alert tone="danger">{versionsError}</Alert>{/if}
@@ -283,28 +283,28 @@
             bind:value={loaderBuildChannel}
             size="sm"
             options={[
-              { value: "all", label: "Todos" },
-              { value: "stable", label: "Estables" },
-              { value: "experimental", label: "Experimentales" },
+              { value: "all", label: "All" },
+              { value: "stable", label: "Stable" },
+              { value: "experimental", label: "Experimental" },
             ]}
             onchange={(v) => onLoaderBuildChannelChange(v)}
           />
           <div class="row-actions">
-            <Button size="xs" variant="outline" disabled={!loaderForm.version || loaderBuildsLoading} onclick={() => pickLatestLoaderBuild("stable")}>Latest estable{loaderBuildLatest?.stable ? ` (${loaderBuildLatest.stable})` : ""}</Button>
+            <Button size="xs" variant="outline" disabled={!loaderForm.version || loaderBuildsLoading} onclick={() => pickLatestLoaderBuild("stable")}>Latest stable{loaderBuildLatest?.stable ? ` (${loaderBuildLatest.stable})` : ""}</Button>
             <Button size="xs" variant="outline" disabled={!loaderForm.version || loaderBuildsLoading || !loaderBuildLatest?.experimental} onclick={() => pickLatestLoaderBuild("experimental")}>Latest experimental{loaderBuildLatest?.experimental ? ` (${loaderBuildLatest.experimental})` : ""}</Button>
           </div>
           {#if loaderBuildsLoading}
-            <Spinner label="Cargando builds…" />
+            <Spinner label="Loading builds…" />
           {:else}
             <Select bind:value={loaderForm.loaderBuild} disabled={loaderBusy || !loaderForm.version}>
-              <option value="">Selecciona un build…</option>
+              <option value="">Select a build…</option>
               {#each filteredModalBuilds as b}<option value={vId(b)}>{vId(b)}{(b?.stable === false || b?.channel === "experimental") ? " (experimental)" : ""}</option>{/each}
             </Select>
           {/if}
         </div>
       {/if}
 
-      <Switch bind:checked={loaderForm.downloadJar} label="Descargar el jar del loader al guardar" hint="Recomendado. Puede tardar un poco." disabled={loaderBusy} />
+      <Switch bind:checked={loaderForm.downloadJar} label="Download the loader jar when saving" hint="Recommended. It may take a while." disabled={loaderBusy} />
 
       <TextField
         bind:value={loaderForm.confirmText}

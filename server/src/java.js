@@ -119,7 +119,7 @@ export function listInstalledJava(javaDir) {
       const bin = javaBinFromHome(home);
       if (!bin) continue;
       const id = e.name.replace(/^java-/, "") || e.name;
-      out.push({ id, dirId: e.name, source: "managed", name: `Java ${id} (instalado)`, path: bin, home, installed: true, managed: true });
+      out.push({ id, dirId: e.name, source: "managed", name: `Java ${id} (installed)`, path: bin, home, installed: true, managed: true });
     }
   } catch {}
   out.sort((a, b) => (parseInt(b.id, 10) || 0) - (parseInt(a.id, 10) || 0));
@@ -193,7 +193,7 @@ function adoptiumPlatform() {
 
 export async function installJava(javaDir, version, onProgress) {
   const ver = String(version || "").replace(/^java-?/i, "").trim();
-  if (!/^\d+$/.test(ver)) throw new Error("Versión de Java inválida");
+  if (!/^\d+$/.test(ver)) throw new Error("Invalid Java version");
   mkdirSync(javaDir, { recursive: true });
   const { os, arch } = adoptiumPlatform();
   const ext = os === "windows" ? "zip" : "tar.gz";
@@ -208,7 +208,7 @@ export async function installJava(javaDir, version, onProgress) {
   try {
     onProgress?.({ stage: "download", version: ver });
     const res = await fetch(url, { redirect: "follow", headers: { "User-Agent": "SMP-Panel" } });
-    if (!res.ok) throw new Error(`Adoptium download failed (${res.status}) para Java ${ver} ${os}/${arch}`);
+    if (!res.ok) throw new Error(`Adoptium download failed (${res.status}) for Java ${ver} ${os}/${arch}`);
     if (!res.body) throw new Error(`Empty Adoptium response for Java ${ver}`);
     await streamPipeline(Readable.fromWeb(res.body), createWriteStream(tmp));
     onProgress?.({ stage: "extract", version: ver });
@@ -223,9 +223,9 @@ export async function installJava(javaDir, version, onProgress) {
     renameSync(stage, targetDir);
     const home = resolveJavaHome(targetDir);
     const bin = javaBinFromHome(home);
-    if (!bin) throw new Error("La instalación de Java no contiene bin/java ejecutable");
+    if (!bin) throw new Error("The Java installation does not contain an executable bin/java");
     onProgress?.({ stage: "done", version: ver });
-    return { ok: true, id: ver, path: bin, home, name: `Java ${ver} (instalado)` };
+    return { ok: true, id: ver, path: bin, home, name: `Java ${ver} (installed)` };
   } catch (e) {
     try { rmSync(stage, { recursive: true, force: true }); } catch {}
     try { rmSync(targetDir, { recursive: true, force: true }); } catch {}
@@ -238,7 +238,7 @@ export async function installJava(javaDir, version, onProgress) {
 export function uninstallJava(javaDir, version) {
   const ver = String(version || "").replace(/^java-?/i, "").trim();
   const dir = join(javaDir, `java-${ver}`);
-  if (!existsSync(dir)) return { ok: false, error: "No instalado" };
+  if (!existsSync(dir)) return { ok: false, error: "Not installed" };
   rmSync(dir, { recursive: true, force: true });
   return { ok: true };
 }
@@ -311,7 +311,7 @@ export async function resolveJavaForServer(javaDir, requested) {
       const onPath = findExecutable("java");
       if (onPath) return { ok: true, command: onPath, version: raw };
     }
-    return { ok: false, error: `No se encontró el Java seleccionado (${raw}). Instálalo en Ajustes → Java o elige otro runtime.` };
+    return { ok: false, error: `Could not find the selected Java (${raw}). Install it in Settings → Java or choose another runtime.` };
   }
 
   if (raw === "system") {
@@ -322,13 +322,13 @@ export async function resolveJavaForServer(javaDir, requested) {
     }
     const onPath = findExecutable("java");
     if (onPath) return { ok: true, command: onPath, version: "system" };
-    return { ok: false, error: "No se encontró Java del sistema (PATH/JAVA_HOME). Instala un runtime en Ajustes → Java o selecciona uno gestionado." };
+    return { ok: false, error: "Could not find a system Java (PATH/JAVA_HOME). Install a runtime in Settings → Java or select a managed one." };
   }
 
   if (/^\d+$/.test(raw)) {
     const bin = javaBinFromHome(getInstalledJavaHome(javaDir, raw));
     if (bin) return { ok: true, command: bin, version: raw };
-    return { ok: false, error: `Java ${raw} no está instalado. Instálalo en Ajustes → Java antes de iniciar el servidor.`, javaVersion: raw };
+    return { ok: false, error: `Java ${raw} is not installed. Install it in Settings → Java before starting the server.`, javaVersion: raw };
   }
 
   // No explicit runtime: newest installed, else tell the user which one to install.
@@ -338,7 +338,7 @@ export async function resolveJavaForServer(javaDir, requested) {
   const fallback = defaultJavaId(javaDir, detected);
   return {
     ok: false,
-    error: `No hay Java instalado. Instala Java ${fallback} en Ajustes → Java antes de iniciar el servidor.`,
+    error: `No Java installed. Install Java ${fallback} in Settings → Java before starting the server.`,
     javaVersion: fallback,
   };
 }

@@ -74,7 +74,7 @@ describe("version picker helpers", () => {
   });
 
   it("moves the selection to the first visible entry when filtered out", () => {
-    // "Latest experimental" resets to Todos and selects 26.4-snapshot-8.
+    // "Latest experimental" resets to All and selects 26.4-snapshot-8.
     expect(reconcileSelection(MC, "all", "26.4-snapshot-8")).toBe("26.4-snapshot-8");
     // Switching to Stable must not leave an experimental build selected.
     const next = reconcileSelection(MC, "stable", "26.4-snapshot-8");
@@ -91,7 +91,7 @@ describe("version picker helpers", () => {
 });
 
 describe("latest flow end to end (App logic)", () => {
-  // Mirrors App.handlePickLatest: reset the filter to "Todos", then select the requested build.
+  // Mirrors App.handlePickLatest: reset the filter to "All", then select the requested build.
   function pickLatestFlow(list, meta, want) {
     const channel = "all";
     const versions = filterByChannel(list, channel);
@@ -99,7 +99,7 @@ describe("latest flow end to end (App logic)", () => {
     return { channel, versions, pick, visible: versions.some((v) => versionId(v) === pick) };
   }
 
-  it("experimental: filter becomes Todos and the experimental build is selected", () => {
+  it("experimental: filter becomes All and the experimental build is selected", () => {
     const meta = { latest: { stable: "26.3", experimental: "26.4-snapshot-8" } };
     const out = pickLatestFlow(MC, meta, "experimental");
     expect(out.channel).toBe("all");
@@ -108,7 +108,7 @@ describe("latest flow end to end (App logic)", () => {
     expect(out.versions.map(versionId)).toContain("26.4-snapshot-8");
   });
 
-  it("stable: filter becomes Todos and the stable build is selected", () => {
+  it("stable: filter becomes All and the stable build is selected", () => {
     const meta = { latest: { stable: "26.3", experimental: "26.4-snapshot-8" } };
     const out = pickLatestFlow(MC, meta, "stable");
     expect(out.channel).toBe("all");

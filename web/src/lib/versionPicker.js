@@ -79,7 +79,7 @@ export function pickLatest(list, meta, want = "stable") {
 }
 
 /**
- * Pick a loader build for `want`, honouring the "reset to Todos first" rule.
+ * Pick a loader build for `want`, honouring the "reset to All first" rule.
  * @param {any[]} builds
  * @param {{ latest?: any } | null} meta
  * @param {string} want
