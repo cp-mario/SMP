@@ -37,21 +37,12 @@
 
 <header class="page-header">
   <div>
-    <div class="page-eyebrow"><Icon name="grid" size={12} /> Workspace</div>
     <h1>Servers</h1>
     <div class="subtitle">
       {servers.length} instance{servers.length === 1 ? "" : "s"} · {running} running · {stopped} stopped
     </div>
   </div>
   <div class="header-actions">
-    {#if onCreateModpack}
-      <Button size="sm" variant="outline" onclick={onCreateModpack} title="Create a server from a modpack">
-        <Icon name="package" size={14} /> From modpack
-      </Button>
-    {/if}
-    <Button size="sm" variant="outline" loading={refreshing} onclick={refresh}>
-      {#if !refreshing}<Icon name="refresh" size={14} />{/if} Refresh
-    </Button>
     <Button size="sm" variant="primary" onclick={() => requestNewServer()}>
       <Icon name="plus" size={14} /> New server
     </Button>

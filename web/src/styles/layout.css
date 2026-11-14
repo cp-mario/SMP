@@ -52,18 +52,6 @@
   font-size: 0.84rem;
 }
 
-.page-eyebrow {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 6px;
-  color: color-mix(in srgb, var(--accent) 58%, var(--text-secondary));
-  font-size: 0.67rem;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-}
-
 .header-actions {
   display: flex;
   align-items: center;
