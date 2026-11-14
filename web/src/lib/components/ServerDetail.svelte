@@ -35,7 +35,7 @@
   import LoaderModal from "./server/LoaderModal.svelte";
   import BackupsTab from "./server/BackupsTab.svelte";
 
-  let { id } = $props();
+  let { id, onServersChanged = undefined } = $props();
 
   let server = $state(null);
   let loading = $state(true);
@@ -77,7 +77,8 @@
   let portPanelEl = $state(null);
   let systemInfo = $state(null);
   let javaRuntimes = $state([]);
-  let jvmEdit = $state({ memoryMb: 2048, jvmArgs: "", javaVersion: "21", saving: false });
+  let javaDefault = $state(null);
+  let jvmEdit = $state({ memoryMb: 2048, jvmArgs: "", javaVersion: "25", saving: false });
   let jvmPanelEl = $state(null);
   let customCommand = $state("");
   let customCommandBusy = $state(false);
@@ -149,10 +150,11 @@
     game_v6: "Bedrock IPv6 listener (UDP)",
     bedrock: "Bedrock Edition listener (UDP)",
   });
+  const javaFallback = $derived(javaDefault || "25");
   const jvmDirty = $derived(!!server && (
     jvmEdit.memoryMb !== parseMemMb(server.memory_max) ||
     (jvmEdit.jvmArgs || "") !== (server.jvm_args || "") ||
-    (jvmEdit.javaVersion || "") !== (server.java_version || "21")
+    (jvmEdit.javaVersion || "") !== (server.java_version || javaFallback)
   ));
 
   function parseMemMb(v) {
@@ -194,6 +196,7 @@
   }
 
   async function loadDetail({ quiet = false, updates = false } = {}) {
+    const wasOnline = server?.online;
     try {
       const data = await loadServer(id, { updates });
       // Quiet polls do not refetch update info; keep the last known result so the
@@ -211,12 +214,15 @@
       const editingPort = !!(portPanelEl && typeof document !== "undefined" && portPanelEl.contains(document.activeElement));
       const editingCommand = !!(customCommandEl && typeof document !== "undefined" && customCommandEl.contains(document.activeElement));
       if (changed) server = data;
+      // A process can exit on its own (crash/stop): keep the servers list and the
+      // sidebar in sync without waiting for a manual refresh.
+      if (wasOnline != null && server && Number(server.online) !== Number(wasOnline)) notifyServersChanged({ updates: false, silent: true });
       if (!editingPort) syncPortEdits();
       if (!editingJvm) {
         const source = server || data;
         jvmEdit.memoryMb = parseMemMb(source.memory_max);
         jvmEdit.jvmArgs = source.jvm_args || "";
-        jvmEdit.javaVersion = source.java_version || "21";
+        jvmEdit.javaVersion = source.java_version || javaFallback;
       }
       if (!editingCommand) customCommand = commandText((server || data).exec);
       if (!quiet || !editingJvm) loadError = "";
@@ -275,7 +281,7 @@
     (async () => {
       try { systemInfo = await loadSystemInfo(); } catch { systemInfo = null; }
       try { loaders = await loadLoaders(); } catch { loaders = []; }
-      try { javaRuntimes = (await loadJava()).runtimes || []; } catch { javaRuntimes = []; }
+      try { const java = await loadJava(); javaRuntimes = java.runtimes || []; javaDefault = java.defaultVersion || null; } catch { javaRuntimes = []; }
       if (cancelled) return;
       await Promise.all([loadDetail({ updates: true }), loadSftp()]);
       if (cancelled) return;
@@ -303,11 +309,17 @@
     if (sftpCopyTimer) clearTimeout(sftpCopyTimer);
   });
 
+  /** Tell the app (servers list + sidebar) that something changed on this server. */
+  async function notifyServersChanged({ updates = false, silent = false } = {}) {
+    try { await onServersChanged?.({ updates, silent }); } catch { /* refresh failures must not fail the action */ }
+  }
+
   async function runAction(label, fn, okMessage) {
     busy = label;
     try {
       await fn();
       await loadDetail({ quiet: true });
+      await notifyServersChanged({ updates: false });
       if (okMessage) toasts.success(okMessage);
     } catch (e) {
       if (e?.data?.eulaRequired) window.dispatchEvent(new CustomEvent("smp:eula", { detail: { id, action: label } }));
@@ -329,6 +341,7 @@
       const res = await forceStopServer(id);
       showForceStopModal = false;
       await loadDetail({ quiet: true });
+      await notifyServersChanged({ updates: false });
       if (res?.stopped === false) toasts.warning(res?.message || "The server process was not running in this panel session.");
       else toasts.success("Server process killed");
     } catch (e) {
@@ -344,6 +357,7 @@
     try {
       await updateServer(id, { memory_max: `${jvmEdit.memoryMb}M`, jvm_args: jvmEdit.jvmArgs, java_version: jvmEdit.javaVersion || "" });
       await loadDetail({ quiet: true });
+      await notifyServersChanged({ updates: false });
       toasts.success("Java / RAM / JVM saved. Restart the server to apply Java changes.");
     } catch (e) {
       toasts.error("Could not save settings", e);
@@ -396,6 +410,7 @@
       for (const ep of extraPorts) await updateServerPort(id, ep.id, { port: ep.port });
       await loadDetail({ quiet: true });
       syncPortEdits();
+      await notifyServersChanged({ updates: false });
       toasts.success(`Ports saved${server.online === 1 ? " · restart to apply" : ""}`);
     } catch (e) {
       toasts.error("Could not save ports", e);
@@ -420,6 +435,7 @@
       extraPort = "";
       await loadDetail({ quiet: true });
       syncPortEdits();
+      await notifyServersChanged({ updates: false });
       toasts.success(`Reserved ${extraProtocol.toUpperCase()} ${port} for ${label}`);
     } catch (e) {
       toasts.error("Could not reserve port", e);
@@ -435,6 +451,7 @@
       await deleteServerPort(id, p.id);
       await loadDetail({ quiet: true });
       syncPortEdits();
+      await notifyServersChanged({ updates: false });
       toasts.success(`Released ${p.label} (${p.protocol.toUpperCase()} ${p.port})`);
     } catch (e) {
       toasts.error("Could not release port", e);
@@ -450,6 +467,7 @@
       const res = await autoFixServerPorts(id);
       await loadDetail({ quiet: true });
       syncPortEdits();
+      await notifyServersChanged({ updates: false });
       const moved = res?.moved || [];
       toasts.success(moved.length ? `Moved ${moved.length} port(s) to free values` : "All ports are already free");
     } catch (e) {
@@ -481,6 +499,7 @@
     try {
       await deleteServer(id);
       showDeleteModal = false;
+      await notifyServersChanged({ updates: false });
       toasts.success("Server deleted");
       router.navigate("/");
     } catch (e) {
@@ -545,6 +564,7 @@
       showRawModal = false;
       toasts.success("Raw server data updated");
       await loadDetail({ quiet: true, updates: true });
+      await notifyServersChanged({ updates: true });
     } catch (e) {
       rawError = e?.message || String(e);
     } finally {
@@ -561,7 +581,25 @@
       await updateServer(id, { loader_version: server.update.recommended, loader_channel: ch, loader_build: "" });
       await installServerJar(server.loader, server.update.recommended, id, ch, "");
       await loadDetail({ quiet: true, updates: true });
+      await notifyServersChanged({ updates: true });
       toasts.success(`Server updated to ${server.update.recommended}`);
+    } catch (e) {
+      toasts.error("Update failed", e);
+    } finally {
+      updateBusy = false;
+    }
+  }
+
+  async function handleUpdateBuild() {
+    if (!server?.update?.build?.recommended) return;
+    if (server.online === 1) return toasts.warning("Stop the server before updating it.");
+    updateBusy = true;
+    try {
+      const ch = server.update.build.channel || server.loader_channel || "stable";
+      await installServerJar(server.loader, server.loader_version, id, ch, server.update.build.recommended);
+      await loadDetail({ quiet: true, updates: true });
+      await notifyServersChanged({ updates: true });
+      toasts.success(`Server updated to build ${server.update.build.recommended}`);
     } catch (e) {
       toasts.error("Update failed", e);
     } finally {
@@ -574,6 +612,7 @@
     updatesBusy = true;
     try {
       await loadDetail({ quiet: true, updates: true });
+      await notifyServersChanged({ updates: true });
       if (server.online === 1) toasts.warning("Stop the server to check for updates.");
     } catch (e) {
       toasts.error("Could not check for updates", e);
@@ -589,6 +628,7 @@
     try {
       const res = await updateModpack(id);
       await loadDetail({ quiet: true, updates: true });
+      await notifyServersChanged({ updates: true });
       toasts.success(res?.unchanged ? "The modpack is already up to date" : `Modpack updated to ${res?.version || "latest"}`);
     } catch (e) {
       toasts.error("Modpack update failed", e);
@@ -943,10 +983,12 @@
             <div class="update-row">
               <div class="update-info">
                 <span class="update-label">Launcher</span>
-                <div class="update-value"><b>{loaderName}</b> · {server.loader_version || "—"}{server.loader_build ? ` (${server.loader_build})` : ""}</div>
+                <div class="update-value"><b>{loaderName}</b> · {server.loader_version || "—"}{server.loader_build ? ` (${server.loader_build})` : (server.update?.build?.installed ? ` (build ${server.update.build.installed})` : "")}</div>
               </div>
               {#if server.update?.recommended}
                 <Button size="sm" variant="primary" loading={updateBusy} disabled={server.online === 1} onclick={handleUpdateToLatest}><Icon name="download" size={13} /> Update to {server.update.recommended}</Button>
+              {:else if server.update?.build?.recommended}
+                <Button size="sm" variant="primary" loading={updateBusy} disabled={server.online === 1} onclick={handleUpdateBuild}><Icon name="download" size={13} /> Update to build {server.update.build.recommended}</Button>
               {:else if server.update}
                 <Badge tone="success">Up to date</Badge>
               {/if}
@@ -1133,7 +1175,7 @@
     bind:open={showLoaderModal}
     {server}
     {loaders}
-    onsaved={() => loadDetail({ quiet: true, updates: true })}
+    onsaved={async () => { await loadDetail({ quiet: true, updates: true }); await notifyServersChanged({ updates: true }); }}
   />
 
   <ConfirmDialog

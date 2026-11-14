@@ -71,7 +71,7 @@
     </div>
 
     <ul class="server-list">
-      {#each servers as s}
+      {#each servers as s (s.id)}
         <li>
           <a
             class="server-item"

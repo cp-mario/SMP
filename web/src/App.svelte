@@ -66,6 +66,7 @@
   let path = $state(router.path);
   let booting = $state(true);
   let accentTimer = null;
+  let serversTimer = null;
 
   // Route views are split into their own chunks, so the dashboard paints without
   // downloading the server detail, store browser or settings code.
@@ -110,11 +111,18 @@
     }, 400);
   }
 
-  async function refreshServers({ updates = true } = {}) {
+  async function refreshServers({ updates = true, silent = false } = {}) {
     try {
-      appState.servers = await loadServers({ updates });
+      const next = await loadServers({ updates });
+      // Status polls do not fetch update info (updates=0); keep the last known
+      // badge instead of clearing it every 5 seconds.
+      if (!updates && Array.isArray(appState.servers)) {
+        const prev = new Map(appState.servers.map((s) => [s.id, s.update]));
+        for (const s of next) if (s.update == null && prev.has(s.id)) s.update = prev.get(s.id);
+      }
+      appState.servers = next;
     } catch (e) {
-      toasts.error("Could not load servers", e);
+      if (!silent) toasts.error("Could not load servers", e);
     }
   }
 
@@ -133,6 +141,9 @@
       appState.javaRuntimes = java.runtimes || [];
       appState.javaInfo = java;
       appState.detectedJava = java.detected || [];
+      // New servers preselect the newest installed Java (or the newest available).
+      const newestAvailable = (java.available || []).slice().sort((a, b) => (Number(b.major) || 0) - (Number(a.major) || 0))[0]?.id;
+      appState.selectedJava = java.defaultVersion || newestAvailable || "25";
       appState.systemInfo = systemInfo;
       applyAccent(settings.accent_color || appState.accentColor, { persist: false });
       // Version check runs in the background: the sidebar dot and Settings both read it.
@@ -159,12 +170,22 @@
     };
     window.addEventListener("smp:new-server", onNewServer);
     window.addEventListener("smp:eula", onEula);
+    const onVisible = () => { if (document.visibilityState === "visible" && view !== "server") refreshServers({ updates: false, silent: true }); };
+    document.addEventListener("visibilitychange", onVisible);
+    // Keep the servers list and the sidebar fresh (external stops, crashes, changes
+    // made from the detail view). The detail view has its own poll and notifies us.
+    serversTimer = setInterval(() => {
+      if (document.visibilityState === "hidden" || view === "server") return;
+      refreshServers({ updates: false, silent: true });
+    }, 5000);
     init();
     return () => {
       stopRouter();
       unsubscribe();
       window.removeEventListener("smp:new-server", onNewServer);
       window.removeEventListener("smp:eula", onEula);
+      document.removeEventListener("visibilitychange", onVisible);
+      if (serversTimer) clearInterval(serversTimer);
     };
   });
 
@@ -429,6 +450,7 @@
     appState.javaInfo = info;
     appState.javaRuntimes = info.runtimes || [];
     appState.detectedJava = info.detected || [];
+    if (info?.defaultVersion) appState.selectedJava = info.defaultVersion;
   }
 </script>
 
@@ -462,7 +484,7 @@
         {#if loadedViews.server && loadedViews.server !== "loading"}
           {@const ServerDetail = loadedViews.server}
           {#key serverId}
-            <ServerDetail id={serverId} />
+            <ServerDetail id={serverId} onServersChanged={refreshServers} />
           {/key}
         {:else}
           <div class="boot"><div class="spinner"></div><span>Loading server…</span></div>

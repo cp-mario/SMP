@@ -105,6 +105,14 @@ export function migrateServerPorts() {
     CREATE INDEX IF NOT EXISTS idx_server_extra_ports_server ON server_extra_ports(server_id);
   `);
 
+  // Reservations whose server row is gone are orphans (e.g. a server deleted by an
+  // older panel version that only removed server_extra_ports). They would keep the
+  // port marked as in use forever, so drop them before re-seeding.
+  try {
+    db.exec("DELETE FROM server_ports WHERE server_id NOT IN (SELECT id FROM servers)");
+    db.exec("DELETE FROM server_extra_ports WHERE server_id NOT IN (SELECT id FROM servers)");
+  } catch { /* best-effort cleanup */ }
+
   const rows = db.prepare("SELECT id, loader, port FROM servers").all();
   const insert = db.prepare("INSERT INTO server_ports(server_id, role, port, protocol) VALUES(?,?,?,?)");
   for (const row of rows) {
@@ -229,6 +237,18 @@ export function updateServerExtraPort(serverId, id, { port }) {
 
 export function deleteServerExtraPort(serverId, id) {
   db.prepare("DELETE FROM server_extra_ports WHERE server_id = ? AND id = ?").run(serverId, id);
+}
+
+/**
+ * Free every reservation held by a server (loader roles + plugin/extra ports).
+ * Must be called when a server is deleted, otherwise its ports stay "in use".
+ */
+export function deleteServerPorts(serverId) {
+  const remove = db.transaction((id) => {
+    db.prepare("DELETE FROM server_ports WHERE server_id = ?").run(id);
+    db.prepare("DELETE FROM server_extra_ports WHERE server_id = ?").run(id);
+  });
+  remove(serverId);
 }
 
 function nextFreeFromDb(start, protocol, used) {

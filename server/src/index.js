@@ -13,13 +13,13 @@ import { pipeline, Readable } from "stream";
 import { promisify } from "util";
 import { getSftpInfo, setSftpPassword, startSftpServer, stopSftpServer, getSftpStatus, autoStartSftp, sftpEnabledKey, sftpPasswordKey } from "./sftp.js";
 import { createBackupArchive, extractBackupArchive, convertZipToTarZst, tarZstToZip, BACKUP_FORMAT } from "./backups.js";
-import { AVAILABLE_JAVA_VERSIONS, detectJava, listInstalledJava, installJava, uninstallJava, resolveJavaCommand, getInstalledJavaHome } from "./java.js";
+import { AVAILABLE_JAVA_VERSIONS, detectJava, listInstalledJava, installJava, uninstallJava, resolveJavaCommand, resolveJavaForServer, defaultJavaId, getInstalledJavaHome } from "./java.js";
 import { getLoader, listLoaders, loaderIds, requiresEula } from "./loaders/index.js";
 import { listSources, searchStore, getProject, getVersions, lookupHash, findModUpdates, findModUpdate, latestVersion, resolveDownload, sourceConfigured, getSource } from "./mods/index.js";
 import { installModpack, downloadFile } from "./mods/packs.js";
 import { sha1File, sha256File, fingerprintFile } from "./mods/http.js";
 import { modsTarget, folderForTarget } from "./mods/loaders.js";
-import { portProfile, isPortNumber, isPortBindable, allocateServerPorts, saveServerPorts, applyPortsToConfig, checkServerStartupPorts, serverPortsStatus, formatPortConflict, migrateServerPorts, PortConflictError, findPortOwner, insertServerExtraPort, updateServerExtraPort, deleteServerExtraPort, getServerExtraPorts } from "./ports.js";
+import { portProfile, isPortNumber, isPortBindable, allocateServerPorts, saveServerPorts, applyPortsToConfig, checkServerStartupPorts, serverPortsStatus, formatPortConflict, migrateServerPorts, PortConflictError, findPortOwner, insertServerExtraPort, updateServerExtraPort, deleteServerExtraPort, deleteServerPorts, getServerExtraPorts } from "./ports.js";
 import { startPortGuard, stopPortGuard } from "./portGuard.js";
 import { appVersion, getUpdateState, applyUpdate, normalizeChannel, defaultChannel } from "./version.js";
 
@@ -965,7 +965,12 @@ async function startServerById(id, row) {
     if (jarIndex >= 0) args = [...cleaned.slice(0, jarIndex), ...memory, ...cleaned.slice(jarIndex)];
     else args = [...memory, ...cleaned];
     if (!args.includes("nogui")) args.push("nogui");
-    command = await resolveJavaCommand(JAVA_DIR, r.java_version, "java");
+    const javaLaunch = await resolveJavaForServer(JAVA_DIR, r.java_version);
+    if (!javaLaunch.ok) {
+      logLine(id, `Error: ${javaLaunch.error}`);
+      return new Response(JSON.stringify({ ok: false, error: javaLaunch.error, javaRequired: true, javaVersion: javaLaunch.javaVersion || null }), { status: 400, headers: { "Content-Type": "application/json" } });
+    }
+    command = javaLaunch.command;
   } else if (exec.type === "bedrock") {
     const bedrockExe = process.platform === "win32" ? "bedrock_server.exe" : "bedrock_server";
     command = join(dir, bedrockExe);
@@ -1052,7 +1057,14 @@ async function createServerRecord(body = {}) {
     throw e;
   }
   const gamePort = allocation.ports.find((p) => p.role === "game")?.port ?? defaultPort;
-  const created = createServerRecordSync({ ...body, port: gamePort });
+  // New Java servers default to the newest installed runtime, or the newest
+  // available one (which the start check will ask the user to install).
+  const loaderMeta = (getLoader(loaderId) || { meta: () => ({}) }).meta?.() || {};
+  let javaVersion = String(body.java_version || "").trim();
+  if (!javaVersion && loaderMeta.java) {
+    try { javaVersion = defaultJavaId(JAVA_DIR, await detectJava(JAVA_DIR)); } catch { javaVersion = ""; }
+  }
+  const created = createServerRecordSync({ ...body, port: gamePort, java_version: javaVersion });
   saveServerPorts(created.id, allocation.ports);
   applyPortsToConfig({ dir: serverFilesDir(created.id), loaderId, ports: allocation.ports });
   return { ...created, ports: allocation.ports };
@@ -1181,7 +1193,7 @@ export const serversRoute = new Elysia({ prefix: "/api/servers" })
     try { db.prepare("DELETE FROM mods WHERE server_id = ?").run(params.id); } catch {}
     try { db.prepare("DELETE FROM backups WHERE server_id = ?").run(params.id); } catch {}
     try { db.prepare("DELETE FROM schedules WHERE server_id = ?").run(params.id); } catch {}
-    try { db.prepare("DELETE FROM server_extra_ports WHERE server_id = ?").run(params.id); } catch {}
+    try { deleteServerPorts(params.id); } catch {}
     try { db.prepare("DELETE FROM servers WHERE id = ?").run(params.id); } catch {}
     try { db.prepare("DELETE FROM settings WHERE key LIKE ?").run(`sftp_%_${params.id}`); } catch {}
     try { db.prepare("DELETE FROM settings WHERE key = ?").run(sftpEnabledKey(params.id)); } catch {}
@@ -1523,6 +1535,76 @@ function buildUpdateInfo(row, items) {
   }
   return out;
 }
+
+const __buildCache = globalThis.__smp_buildCache || (globalThis.__smp_buildCache = new Map());
+
+/** Installed Paper/Folia/Purpur build, read from version_history.json when the row has none. */
+function installedPaperLikeBuild(row) {
+  const stored = String(row?.loader_build || "").trim();
+  if (stored) return stored;
+  if (!["paper", "folia", "purpur"].includes(String(row?.loader || ""))) return "";
+  for (const dir of [".paper", ".purpur"]) {
+    try {
+      const file = join(serverFilesDir(row.id), dir, "version_history.json");
+      if (!existsSync(file)) continue;
+      const data = JSON.parse(readFileSync(file, "utf8"));
+      if (data?.lastBuild != null && String(data.lastBuild).trim()) return String(data.lastBuild).trim();
+      const m = String(data?.currentVersion || "").match(/-(\d{2,})(?!\d)/);
+      if (m) return m[1];
+    } catch { /* try next candidate */ }
+  }
+  return "";
+}
+
+/**
+ * Build-level update (Paper builds, Fabric loader versions, Forge/NeoForge builds...).
+ * Returns null when the loader exposes no build list or the server is already current.
+ */
+async function getLoaderBuildUpdateInfo(row, { force = false } = {}) {
+  const impl = getLoader(row?.loader);
+  if (!impl || typeof impl.getLoaderVersions !== "function") return null;
+  const version = String(row?.loader_version || "").trim();
+  if (!version) return null;
+  const installed = installedPaperLikeBuild(row);
+  const channel = String(row?.loader_channel || "").toLowerCase() === "experimental" ? "experimental" : "stable";
+  const key = `${row.loader}:${version}:${channel}`;
+  const cached = __buildCache.get(key);
+  const now = Date.now();
+  let items = cached?.items;
+  if (force || !cached || now - cached.at > 10 * 60 * 1000) {
+    try {
+      items = normalizeVersionList(await impl.getLoaderVersions(version));
+      __buildCache.set(key, { at: now, items });
+    } catch {
+      items = cached?.items || [];
+    }
+  }
+  const list = (Array.isArray(items) ? items : []).slice().sort((a, b) => {
+    const an = Number(a.id), bn = Number(b.id);
+    if (Number.isFinite(an) && Number.isFinite(bn)) return bn - an;
+    return compareVersionLike(b.id, a.id);
+  });
+  if (!list.length) return null;
+  const sameChannel = list.filter((v) => v.channel === channel);
+  const pool = sameChannel.length ? sameChannel : list;
+  const latest = pool[0]?.id || null;
+  if (!latest) return null;
+  const currentNum = Number(installed);
+  const latestNum = Number(latest);
+  const newer = installed
+    ? (Number.isFinite(currentNum) && Number.isFinite(latestNum) ? latestNum > currentNum : compareVersionLike(latest, installed) > 0)
+    : true;
+  if (!newer) return null;
+  return {
+    installed: installed || null,
+    latest,
+    recommended: latest,
+    recommendation: installed
+      ? `Nuevo build disponible: ${latest}`
+      : `Build instalado no registrado; último disponible: ${latest}`,
+    channel,
+  };
+}
 function modpackMeta(pack) {
   return {
     source: pack.source || "",
@@ -1603,7 +1685,9 @@ async function getServerUpdateInfo(row, { force = false } = {}) {
     try { items = (await getLoaderVersions(row.loader, "all")).items; __updateCache.set(key, { at: now, items }); }
     catch { items = cached?.items || []; }
   }
-  return buildUpdateInfo(row, items || []);
+  const info = buildUpdateInfo(row, items || []);
+  info.build = await getLoaderBuildUpdateInfo(row, { force });
+  return info;
 }
 
 async function fetchLoaderVersionsFor({ loader, version, channel = "all" } = {}) {
@@ -1648,6 +1732,7 @@ export const jarRoute = new Elysia({ prefix: "/api/jar" })
         db.prepare("UPDATE servers SET jar = ?, loader_version = ?, loader_channel = ?, loader_build = ? WHERE id = ?").run(fileName, resolvedVersion, result.channel || channel || "", resolvedLoaderBuild, serverId);
         if (result.exec !== undefined) db.prepare("UPDATE servers SET exec = ? WHERE id = ?").run(result.exec ? JSON.stringify(result.exec) : null, serverId);
         try { __updateCache.delete(loaderId); } catch {}
+        for (const k of __buildCache.keys()) if (k.startsWith(`${loaderId}:`)) __buildCache.delete(k);
       }
       return { ...result, file: fileName, version: resolvedVersion, loader_build: resolvedLoaderBuild, loaderVersion: resolvedLoaderBuild || null };
     } catch (e) {
@@ -2365,7 +2450,7 @@ export const javaRoute = new Elysia({ prefix: "/api/java" })
     ];
     const seen = new Set();
     const rt = runtimes.filter(r => { const k = String(r.id); if (seen.has(k)) return false; seen.add(k); return true; });
-    return { available, installed, detected, runtimes: rt, javaDir: JAVA_DIR };
+    return { available, installed, detected, runtimes: rt, defaultVersion: defaultJavaId(JAVA_DIR, detected), javaDir: JAVA_DIR };
   })
   .get("/runtimes", async () => {
     const [detected, installed] = await Promise.all([detectJava(JAVA_DIR).catch(() => []), Promise.resolve(listInstalledJava(JAVA_DIR))]);

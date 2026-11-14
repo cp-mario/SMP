@@ -255,3 +255,90 @@ export async function resolveJavaCommand(javaDir, requested, fallback = "java") 
   const bin = javaBinFromHome(home);
   return bin || fallback;
 }
+
+function javaMajorFromText(text) {
+  const value = String(text || "");
+  const versionMatch = value.match(/version\s+"?(\d+)(?:\.(\d+))?/i);
+  const homeMatch = value.match(/(?:jdk|jre|java)[-_]?(\d+)(?:[._](\d+))?/i);
+  const m = versionMatch || homeMatch || value.match(/(\d+)(?:\.(\d+))?/);
+  if (!m) return null;
+  const major = Number(m[1]);
+  // `java version "1.8.0_392"` means Java 8.
+  return major === 1 && m[2] != null ? Number(m[2]) : major;
+}
+
+/**
+ * Newest installed runtime id (managed folder or detected system Java), or null.
+ * Managed ids win ties so the stored value stays portable ("21" instead of a path).
+ */
+export function newestInstalledJavaId(javaDir, detected = []) {
+  let best = null;
+  const consider = (id, major, managed) => {
+    if (id == null || id === "" || major == null) return;
+    const value = String(id);
+    if (!best || major > best.major || (major === best.major && managed && !best.managed)) {
+      best = { id: value, major, managed: !!managed };
+    }
+  };
+  for (const inst of listInstalledJava(javaDir)) consider(inst.id, javaMajorFromText(inst.id), true);
+  for (const entry of Array.isArray(detected) ? detected : []) {
+    if (entry?.managed) continue; // already covered by listInstalledJava
+    consider(entry?.path || entry?.id, javaMajorFromText(entry?.version || entry?.path || entry?.id), false);
+  }
+  return best?.id || null;
+}
+
+/** Default runtime for new servers: newest installed, else newest available. */
+export function defaultJavaId(javaDir, detected = []) {
+  const installed = newestInstalledJavaId(javaDir, detected);
+  if (installed) return installed;
+  const newest = [...AVAILABLE_JAVA_VERSIONS].sort((a, b) => b.major - a.major)[0];
+  return String(newest?.id || "25");
+}
+
+/**
+ * Resolve the executable used to launch a Java server, or explain what to install.
+ * `requested` may be a managed id ("21"), "system", a path, a bare command or empty.
+ */
+export async function resolveJavaForServer(javaDir, requested) {
+  const raw = String(requested || "").trim();
+
+  if (raw && raw !== "system" && !/^\d+$/.test(raw)) {
+    if (existsSync(raw) && !statSync(raw).isDirectory()) return { ok: true, command: raw, version: raw };
+    const managed = javaBinFromHome(getInstalledJavaHome(javaDir, raw));
+    if (managed) return { ok: true, command: managed, version: raw };
+    if (!raw.includes("/") && !raw.includes("\\")) {
+      const onPath = findExecutable("java");
+      if (onPath) return { ok: true, command: onPath, version: raw };
+    }
+    return { ok: false, error: `No se encontró el Java seleccionado (${raw}). Instálalo en Ajustes → Java o elige otro runtime.` };
+  }
+
+  if (raw === "system") {
+    const jh = process.env.JAVA_HOME;
+    if (jh) {
+      const bin = javaBinFromHome(resolveJavaHome(jh) || jh);
+      if (bin) return { ok: true, command: bin, version: "system" };
+    }
+    const onPath = findExecutable("java");
+    if (onPath) return { ok: true, command: onPath, version: "system" };
+    return { ok: false, error: "No se encontró Java del sistema (PATH/JAVA_HOME). Instala un runtime en Ajustes → Java o selecciona uno gestionado." };
+  }
+
+  if (/^\d+$/.test(raw)) {
+    const bin = javaBinFromHome(getInstalledJavaHome(javaDir, raw));
+    if (bin) return { ok: true, command: bin, version: raw };
+    return { ok: false, error: `Java ${raw} no está instalado. Instálalo en Ajustes → Java antes de iniciar el servidor.`, javaVersion: raw };
+  }
+
+  // No explicit runtime: newest installed, else tell the user which one to install.
+  const detected = await detectJava(javaDir).catch(() => []);
+  const installedId = newestInstalledJavaId(javaDir, detected);
+  if (installedId) return await resolveJavaForServer(javaDir, installedId);
+  const fallback = defaultJavaId(javaDir, detected);
+  return {
+    ok: false,
+    error: `No hay Java instalado. Instala Java ${fallback} en Ajustes → Java antes de iniciar el servidor.`,
+    javaVersion: fallback,
+  };
+}

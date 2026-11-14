@@ -27,6 +27,7 @@
   let loaderVersions = $state([]);
   let loaderLatest = $state(null);
   let versionsLoading = $state(false);
+  let versionsError = $state(null);
   let loaderBuilds = $state([]);
   let loaderBuildsLoading = $state(false);
   let loaderBuildsSupported = $state(false);
@@ -134,15 +135,19 @@
   }
 
   async function fetchLoaderVersions(loader) {
-    if (!loader) { loaderVersions = []; loaderLatest = null; return; }
+    if (!loader) { loaderVersions = []; loaderLatest = null; versionsError = null; return; }
+
     versionsLoading = true;
+    versionsError = null;
     try {
       const res = await loadVersions(loader, "all");
       loaderVersions = res.items;
       loaderLatest = res.latest;
+      versionsError = res.error || null;
     } catch (e) {
       loaderVersions = [];
       loaderLatest = null;
+      versionsError = e?.message || String(e);
       toasts.error("Could not load versions", e);
     } finally {
       versionsLoading = false;
@@ -267,6 +272,7 @@
             <option value="">Selecciona una versión…</option>
             {#each filteredModalVersions as v}<option value={vId(v)}>{vId(v)}{vCh(v) !== "stable" ? " (experimental)" : ""}</option>{/each}
           </Select>
+          {#if versionsError}<Alert tone="danger">{versionsError}</Alert>{/if}
         {/if}
       </div>
 

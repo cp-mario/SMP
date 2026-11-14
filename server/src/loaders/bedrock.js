@@ -6,8 +6,17 @@ import { join } from "path";
 const DATA_REPO = "https://raw.githubusercontent.com/EndstoneMC/bedrock-server-data/v2";
 const VERSIONS_URL = `${DATA_REPO}/versions.json`;
 
+function isX64() {
+  return ["x64", "x86_64", "amd64"].includes(String(process.arch || "").toLowerCase());
+}
+
 function platformBinary() {
+  if (!isX64()) return null;
   return process.platform === "win32" ? "windows" : "linux";
+}
+
+function unsupportedArchMessage() {
+  return `Bedrock Dedicated Server is only published for x86-64 Windows and Linux; there is no ${process.platform}/${process.arch} build.`;
 }
 
 function binaryName() {
@@ -42,6 +51,9 @@ export class BedrockLoader extends BaseLoader {
   }
 
   async getVersions() {
+    // Mojang only ships x86-64 builds: advertising versions on ARM would let the
+    // user install a binary that cannot execute ("Exec format error").
+    if (!platformBinary()) throw new Error(unsupportedArchMessage());
     const reg = await this._registry();
     const release = Array.isArray(reg?.release?.versions) ? reg.release.versions : [];
     const preview = Array.isArray(reg?.preview?.versions) ? reg.preview.versions : [];
@@ -65,11 +77,12 @@ export class BedrockLoader extends BaseLoader {
     if (process.platform === "darwin") {
       throw new Error("Bedrock Dedicated Server is not published for macOS.");
     }
+    const key = platformBinary();
+    if (!key) throw new Error(unsupportedArchMessage());
     const meta = await this._metadata(version);
     if (!meta) {
       throw new Error(`Bedrock Dedicated Server metadata not found for ${version}. Pick a version from the list.`);
     }
-    const key = platformBinary();
     const bin = meta.binary?.[key];
     if (!bin?.url) {
       throw new Error(`Bedrock Dedicated Server has no ${key} build for ${version}.`);

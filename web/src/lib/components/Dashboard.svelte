@@ -69,7 +69,7 @@
 {:else}
 
   <div class="grid">
-    {#each servers as s}
+    {#each servers as s (s.id)}
       <article
         class="card server-card"
         class:running={s.online === 1}
@@ -93,8 +93,8 @@
             <div class="server-tags">
               <Badge tone="accent">{s.loader}</Badge>
               <Badge tone={s.online === 1 ? "success" : "neutral"} dot>{s.online === 1 ? "Online" : "Offline"}</Badge>
-              {#if s.update?.recommended}
-                <Badge tone="warning" dot title={`${s.update.recommended} is available`}>Update</Badge>
+              {#if s.update?.recommended || s.update?.build?.recommended}
+                <Badge tone="warning" dot title={s.update.recommended ? `${s.update.recommended} is available` : `Build ${s.update.build.recommended} is available`}>Update</Badge>
               {/if}
             </div>
           </div>

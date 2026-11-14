@@ -40,25 +40,51 @@ class PaperMCFillLoader extends BaseLoader {
     });
   }
 
-  _selectBuild(builds) {
+  _selectBuild(builds, channel = "all") {
     if (!Array.isArray(builds) || !builds.length) return null;
-    const stable = builds.filter((b) => String(b?.channel || "").toUpperCase() === "STABLE");
-    const pool = stable.length ? stable : builds;
+    const wantExperimental = ["experimental", "beta", "snapshot", "alpha"].includes(String(channel || "").toLowerCase());
+    const matching = builds.filter((b) => {
+      const ch = String(b?.channel || "").toLowerCase();
+      return wantExperimental ? ch !== "stable" : ch === "stable";
+    });
+    const pool = matching.length ? matching : builds;
     return pool.reduce((a, b) => ((Number(b?.id) || 0) > (Number(a?.id) || 0) ? b : a), pool[0]);
   }
 
-  async resolveDownload(version) {
+  async getLoaderVersions(version) {
     const project = this.constructor.project;
     const builds = await fetchJson(`${FILL_API}/${project}/versions/${encodeURIComponent(version)}/builds`);
-    const build = this._selectBuild(builds);
-    if (!build) throw new Error(`${this.constructor.name} build not found for ${version}`);
+    return (Array.isArray(builds) ? builds : []).map((b) => {
+      const stable = String(b?.channel || "").toUpperCase() === "STABLE";
+      return {
+        id: String(b?.id ?? ""),
+        name: `Build ${b?.id ?? ""}`,
+        stable,
+        channel: stable ? "stable" : "experimental",
+        meta: { version, build: b?.id, channel: b?.channel },
+      };
+    }).filter((b) => b.id);
+  }
+
+  async resolveDownload(version, channel = "all", loaderVersion = null) {
+    const project = this.constructor.project;
+    const builds = await fetchJson(`${FILL_API}/${project}/versions/${encodeURIComponent(version)}/builds`);
+    const wanted = String(loaderVersion || "").trim();
+    const build = wanted
+      ? builds.find((b) => String(b?.id) === wanted)
+      : this._selectBuild(builds, channel);
+    if (!build) {
+      throw new Error(wanted
+        ? `${this.constructor.name} build ${wanted} not found for ${version}`
+        : `${this.constructor.name} build not found for ${version}`);
+    }
     const buildId = build?.id;
     const dl = build?.downloads?.["server:default"] || build?.downloads?.application || null;
     const url = dl?.url;
     if (!url) throw new Error(`${this.constructor.name} download not found for ${version} build ${buildId}`);
     const fileName = dl?.name || "server.jar";
     const sha256 = dl?.checksums?.sha256 || null;
-    return { url, fileName, sha256, meta: { project, version, build: buildId, channel: build?.channel } };
+    return { url, fileName, sha256, loaderVersion: String(buildId), meta: { project, version, build: buildId, channel: build?.channel } };
   }
 }
 

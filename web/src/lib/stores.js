@@ -74,11 +74,12 @@ export async function loadJava() {
       installed: data.installed || [],
       detected: data.detected || data.java || [],
       runtimes: data.runtimes || [],
+      defaultVersion: data.defaultVersion || null,
       javaDir: data.javaDir || "",
     };
   } catch {
     const [runtimes, detected] = await Promise.all([api("/java/runtimes").catch(() => ({})), api("/java/detect").catch(() => ({}))]);
-    return { available: [], installed: [], detected: detected.java || detected.detected || [], runtimes: runtimes.runtimes || [], javaDir: "" };
+    return { available: [], installed: [], detected: detected.java || detected.detected || [], runtimes: runtimes.runtimes || [], defaultVersion: null, javaDir: "" };
   }
 }
 
