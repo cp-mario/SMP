@@ -33,6 +33,7 @@
 </script>
 
 <script>
+  import { fade, fly } from "svelte/transition";
   import { cx } from "./cx.js";
   import Icon from "./Icon.svelte";
 
@@ -54,6 +55,11 @@
   } = $props();
 
   const SIZES = { sm: 420, md: 600, lg: 820, xl: 1100, full: 1680 };
+  // Modal-to-modal switches must crossfade: the outgoing overlay fades out while
+  // the incoming one fades in, so the page backdrop never flashes through.
+  const reduceMotion = typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  const backdropMs = reduceMotion ? 0 : 180;
+  const panelMs = reduceMotion ? 0 : 220;
   let panelEl = $state(null);
   let lastFocus = null;
 
@@ -109,8 +115,9 @@
     role="presentation"
     onclick={(e) => { if (closeOnBackdrop && e.target === e.currentTarget) requestClose(); }}
     onkeydown={onKeydown}
+    transition:fade={{ duration: backdropMs }}
   >
-    <div class="modal" role="dialog" aria-modal="true" aria-label={title || "Dialog"} tabindex="-1" bind:this={panelEl}>
+    <div class="modal" role="dialog" aria-modal="true" aria-label={title || "Dialog"} tabindex="-1" bind:this={panelEl} transition:fly={{ y: 14, duration: panelMs }}>
       {#if title || dismissible}
         <div class="modal-header">
           <div class="modal-heading">

@@ -547,15 +547,13 @@
     onOpenModpack={() => { showCreate = false; showModpack = true; }}
   />
 
-  {#if showModpack}
-    <ModpackCreate
-      bind:open={showModpack}
-      systemInfo={appState.systemInfo}
-      onclose={() => { showModpack = false; }}
-      onopenblank={() => { showModpack = false; showCreate = true; }}
-      oncreated={(id) => { refreshServers(); router.navigate(`/server/${id}`); }}
-    />
-  {/if}
+  <ModpackCreate
+    bind:open={showModpack}
+    systemInfo={appState.systemInfo}
+    onclose={() => { showModpack = false; }}
+    onopenblank={() => { showModpack = false; showCreate = true; }}
+    oncreated={(id) => { refreshServers(); router.navigate(`/server/${id}`); }}
+  />
 
   <ToastStack />
 

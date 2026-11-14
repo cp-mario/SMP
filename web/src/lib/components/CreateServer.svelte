@@ -253,9 +253,8 @@
 </script>
 
 <Modal bind:open={open} title="New server" size="lg" onclose={close} dismissible={!createLoading}>
-  {#snippet children()}
-    <div class="create-layout">
-      <div class="create-body">
+  <div class="create-layout">
+    <div class="create-body">
         <section class="form-section">
           <div class="section-head">
             <span class="step-badge">1</span>
@@ -397,16 +396,22 @@
                   >{id}{#if ch !== "stable"}<span class="muted"> (experimental)</span>{/if}</button>
                 {:else}
                   <div class="pill muted">
-                    {#if versionsLoading}Loading versions…{:else if versionsError}Error: {versionsError}{:else}No versions found{/if}
+                    {#if versionsLoading}
+                      Loading versions…
+                    {:else if versionsError}
+                      Error: {versionsError}
+                    {:else}
+                      No versions found
+                    {/if}
                   </div>
                 {/each}
               </div>
             </div>
           {/if}
         {:else}
-            <Alert tone="info" title="Custom loader">
-              No need to choose a version or ports. Create the server and then upload your files, adjust the start command and add the ports, mods and settings you want from the server page.
-            </Alert>
+          <Alert tone="info" title="Custom loader">
+            No need to choose a version or ports. Create the server and then upload your files, adjust the start command and add the ports, mods and settings you want from the server page.
+          </Alert>
         {/if}
 
         {#if !loaderMeta?.custom && (loaderBuildsSupported || loaderBuildsLoading)}
@@ -518,19 +523,23 @@
         <div class="summary-note"><Icon name="info" size={13} /> You can change these settings later.</div>
       </aside>
     </div>
-  {/snippet}
 
-  {#snippet footer()}
-    <Button size="sm" variant="outline" disabled={createLoading} onclick={close}>Cancel</Button>
-    <Button size="sm" variant="outline" disabled={createLoading} onclick={() => onOpenModpack?.()}><Icon name="package" size={13} /> From modpack</Button>
-    <Button
-      size="sm"
-      variant="primary"
-      loading={createLoading}
-      disabled={!canCreate}
-      onclick={() => onCreate?.({ ...(supportsJvm ? { memoryMax: `${memoryMb}M`, jvmArgs } : {}), ports: requestedPorts() })}
-    ><Icon name="plus" size={13} /> Create server</Button>
-  {/snippet}
+    <div class="footer">
+      <div class="footer-left">
+        <Button size="sm" variant="outline" disabled={createLoading} onclick={() => onOpenModpack?.()}><Icon name="package" size={13} /> From modpack</Button>
+      </div>
+
+      <div class="footer-right">
+        <Button size="sm" variant="outline" disabled={createLoading} onclick={close}>Cancel</Button>
+        <Button
+          size="sm"
+          variant="primary"
+          loading={createLoading}
+          disabled={!canCreate}
+          onclick={() => onCreate?.({ ...(supportsJvm ? { memoryMax: `${memoryMb}M`, jvmArgs } : {}), ports: requestedPorts() })}
+        ><Icon name="plus" size={13} /> Create server</Button>
+      </div>
+    </div>
 </Modal>
 
 <style>
@@ -650,9 +659,21 @@
   .summary-row b { overflow-wrap: anywhere; font-weight: 600; text-align: right; }
   .summary-note { display: flex; align-items: flex-start; gap: 6px; color: var(--text-disabled); font-size: 0.7rem; line-height: 1.4; }
   .summary-note :global(.icon) { margin-top: 1px; }
+  .footer-left, .footer-right { display: flex; gap: 8px; }
 
   @media (max-width: 780px) {
     .create-layout { grid-template-columns: minmax(0, 1fr); }
     .create-summary { position: static; }
+  }
+  .footer {
+    display: flex;
+    border-top: 1px solid var(--border);
+    background: color-mix(in srgb, var(--panel-elevated) 55%, transparent);
+    z-index: 2;
+    justify-content: space-between;
+    margin-top: 20px;
+    padding-top: 14px;
+    position: sticky;
+    bottom: 0;
   }
 </style>

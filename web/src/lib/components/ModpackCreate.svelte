@@ -218,8 +218,7 @@
 </script>
 
 <Modal bind:open title="Create from a modpack" subtitle="CurseForge · Modrinth · FTB · Custom" size="lg" onclose={close} dismissible={!busy}>
-  {#snippet children()}
-    <div class="pack-create">
+  <div class="pack-create">
       {#if formError}<Alert tone="danger">{formError}</Alert>{/if}
 
       <Segmented bind:value={source} options={SOURCES} onchange={(v) => changeSource(v)} />
@@ -323,9 +322,8 @@
           <Alert tone="info">The panel downloads the pack, installs its loader and every server-side file. Large packs can take several minutes.</Alert>
         </div>
       {/if}
-    </div>
-  {/snippet}
-  {#snippet footer()}
+  </div>
+  <div slot="footer">
     <div class="footer-left">
       {#if onopenblank}
         <Button size="sm" variant="outline" disabled={busy} onclick={() => { open = false; reset(); onopenblank(); }}><Icon name="plus" size={13} /> Blank server</Button>
@@ -335,7 +333,7 @@
       <Button size="sm" variant="outline" disabled={busy} onclick={close}>Cancel</Button>
       <Button size="sm" variant="primary" loading={busy} disabled={!name.trim() || (source !== "custom" && !selectedPack)} onclick={createServer}><Icon name="plus" size={13} /> Create server</Button>
     </div>
-  {/snippet}
+  </div>
 </Modal>
 
 <style>
