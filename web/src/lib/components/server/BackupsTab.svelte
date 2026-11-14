@@ -539,7 +539,7 @@
 </div>
 
 <Modal bind:open={showCreate} title="New backup" subtitle={server?.name || ""} size="sm" dismissible={!createBusy} closeOnBackdrop={!createBusy} onclose={() => { showCreate = false; }}>
-  {#snippet children()}
+  <svelte:fragment slot="children">
     <div class="modal-stack">
       {#if server?.online === 1}
         <Alert tone="warning">The server is running. For a fully consistent world, stop it before creating the backup.</Alert>
@@ -554,17 +554,17 @@
         autofocus
       />
     </div>
-  {/snippet}
-  {#snippet footer()}
+  </svelte:fragment>
+  <svelte:fragment slot="footer">
     <Button size="sm" variant="outline" disabled={createBusy} onclick={() => (showCreate = false)}>Cancel</Button>
     <Button size="sm" variant="primary" loading={createBusy} onclick={handleCreate}>
       <Icon name="archive" size={13} /> Create backup
     </Button>
-  {/snippet}
+  </svelte:fragment>
 </Modal>
 
 <Modal bind:open={showDownload} title="Download backup" subtitle={downloadTarget ? backupName(downloadTarget) : ""} size="md" onclose={() => { showDownload = false; downloadTarget = null; }}>
-  {#snippet children()}
+  <svelte:fragment slot="children">
     <div class="download-options">
       <button type="button" class="download-option" onclick={() => downloadBackup("tar.zst")}>
         <span class="download-option-icon"><Icon name="archive" size={22} /></span>
@@ -592,11 +592,11 @@
         </span>
       </button>
     </div>
-  {/snippet}
+  </svelte:fragment>
 </Modal>
 
 <Modal bind:open={showRename} title="Rename backup" size="sm" dismissible={!renameBusy} closeOnBackdrop={!renameBusy} onclose={() => { showRename = false; }}>
-  {#snippet children()}
+  <svelte:fragment slot="children">
     <TextField
       bind:value={renameName}
       label="Backup name"
@@ -605,11 +605,11 @@
       disabled={renameBusy}
       autofocus
     />
-  {/snippet}
-  {#snippet footer()}
+  </svelte:fragment>
+  <svelte:fragment slot="footer">
     <Button size="sm" variant="outline" disabled={renameBusy} onclick={() => (showRename = false)}>Cancel</Button>
     <Button size="sm" variant="primary" loading={renameBusy} disabled={!renameDirty} idle={!renameDirty} onclick={handleRename}><Icon name="save" size={13} /> Save name</Button>
-  {/snippet}
+  </svelte:fragment>
 </Modal>
 
 <ConfirmDialog

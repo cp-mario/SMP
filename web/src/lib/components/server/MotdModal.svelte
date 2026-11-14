@@ -138,8 +138,7 @@
   closeOnBackdrop={!iconBusy}
   onclose={() => (open = false)}
 >
-  {#snippet children()}
-    <div class="stack">
+  <div class="stack">
       <TextField
         bind:value={motdValue}
         label="Server MOTD"
@@ -179,12 +178,12 @@
           </div>
         </div>
       </div>
-    </div>
-  {/snippet}
-  {#snippet footer()}
+  </div>
+
+  <div slot="footer" class="modal-footer">
     <Button size="sm" variant="outline" disabled={iconBusy} onclick={() => (open = false)}>Cancel</Button>
     <Button size="sm" variant="primary" loading={iconBusy} disabled={!motdDirty} idle={!motdDirty} onclick={handleSave}>Save</Button>
-  {/snippet}
+  </div>
 </Modal>
 
 <style>

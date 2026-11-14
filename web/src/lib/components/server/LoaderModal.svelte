@@ -237,85 +237,92 @@
   closeOnBackdrop={!loaderBusy}
   onclose={() => (open = false)}
 >
-  {#snippet children()}
-    <div class="stack">
-      <Alert tone="warning">Changing the loader or Minecraft version can break worlds and mods. A backup is created automatically before applying the change (you can disable this in the Backups tab). The server must be stopped.</Alert>
+  <div class="stack">
+    <Alert tone="warning">Changing the loader or Minecraft version can break worlds and mods. A backup is created automatically before applying the change (you can disable this in the Backups tab). The server must be stopped.</Alert>
 
-      <Select bind:value={loaderForm.loader} label="Loader" disabled={loaderBusy} onchange={onLoaderOrChannelChange}>
-        <option value="">Select a loader…</option>
-        {#each loaders as l}<option value={l.id}>{l.name}</option>{/each}
-      </Select>
+    <Select bind:value={loaderForm.loader} label="Loader" disabled={loaderBusy} onchange={onLoaderOrChannelChange}>
+      <option value="">Select a loader…</option>
+      {#each loaders as l}
+        <option value={l.id}>{l.name}</option>
+      {/each}
+    </Select>
 
+    <div class="field-block">
+      <span class="label">Release channel</span>
+      <Segmented
+        bind:value={loaderForm.channel}
+        size="sm"
+        options={[
+          { value: "all", label: "All" },
+          { value: "stable", label: "Stable" },
+          { value: "experimental", label: "Experimental" },
+        ]}
+      />
+      <div class="row-actions">
+        <Button size="xs" variant="outline" disabled={!loaderForm.loader || versionsLoading} onclick={() => pickLatestChannel("stable")}>Latest stable{loaderLatest?.stable ? ` (${loaderLatest.stable})` : ""}</Button>
+        <Button size="xs" variant="outline" disabled={!loaderForm.loader || versionsLoading || !loaderLatest?.experimental} onclick={() => pickLatestChannel("experimental")}>Latest experimental{loaderLatest?.experimental ? ` (${loaderLatest.experimental})` : ""}</Button>
+      </div>
+    </div>
+
+    <div class="field-block">
+      <span class="label">Minecraft version</span>
+      {#if versionsLoading}
+        <Spinner label="Loading versions…" />
+      {:else}
+        <Select bind:value={loaderForm.version} disabled={loaderBusy || !loaderForm.loader} onchange={onLoaderVersionChange}>
+          <option value="">Select a version…</option>
+          {#each filteredModalVersions as v}
+            <option value={vId(v)}>{vId(v)}{vCh(v) !== "stable" ? " (experimental)" : ""}</option>
+          {/each}
+        </Select>
+        {#if versionsError}
+          <Alert tone="danger">{versionsError}</Alert>
+        {/if}
+      {/if}
+    </div>
+
+    {#if loaderBuildsSupported || loaderBuildsLoading}
       <div class="field-block">
-        <span class="label">Release channel</span>
+        <span class="label">{loaders.find((l) => l.id === loaderForm.loader)?.name || "Loader"} build</span>
         <Segmented
-          bind:value={loaderForm.channel}
+          bind:value={loaderBuildChannel}
           size="sm"
           options={[
             { value: "all", label: "All" },
             { value: "stable", label: "Stable" },
             { value: "experimental", label: "Experimental" },
           ]}
+          onchange={(v) => onLoaderBuildChannelChange(v)}
         />
         <div class="row-actions">
-          <Button size="xs" variant="outline" disabled={!loaderForm.loader || versionsLoading} onclick={() => pickLatestChannel("stable")}>Latest stable{loaderLatest?.stable ? ` (${loaderLatest.stable})` : ""}</Button>
-          <Button size="xs" variant="outline" disabled={!loaderForm.loader || versionsLoading || !loaderLatest?.experimental} onclick={() => pickLatestChannel("experimental")}>Latest experimental{loaderLatest?.experimental ? ` (${loaderLatest.experimental})` : ""}</Button>
+          <Button size="xs" variant="outline" disabled={!loaderForm.version || loaderBuildsLoading} onclick={() => pickLatestLoaderBuild("stable")}>Latest stable{loaderBuildLatest?.stable ? ` (${loaderBuildLatest.stable})` : ""}</Button>
+          <Button size="xs" variant="outline" disabled={!loaderForm.version || loaderBuildsLoading || !loaderBuildLatest?.experimental} onclick={() => pickLatestLoaderBuild("experimental")}>Latest experimental{loaderBuildLatest?.experimental ? ` (${loaderBuildLatest.experimental})` : ""}</Button>
         </div>
-      </div>
-
-      <div class="field-block">
-        <span class="label">Minecraft version</span>
-        {#if versionsLoading}
-          <Spinner label="Loading versions…" />
+        {#if loaderBuildsLoading}
+          <Spinner label="Loading builds…" />
         {:else}
-          <Select bind:value={loaderForm.version} disabled={loaderBusy || !loaderForm.loader} onchange={onLoaderVersionChange}>
-            <option value="">Select a version…</option>
-            {#each filteredModalVersions as v}<option value={vId(v)}>{vId(v)}{vCh(v) !== "stable" ? " (experimental)" : ""}</option>{/each}
+          <Select bind:value={loaderForm.loaderBuild} disabled={loaderBusy || !loaderForm.version}>
+            <option value="">Select a build…</option>
+            {#each filteredModalBuilds as b}
+              <option value={vId(b)}>{vId(b)}{(b?.stable === false || b?.channel === "experimental") ? " (experimental)" : ""}</option>
+            {/each}
           </Select>
-          {#if versionsError}<Alert tone="danger">{versionsError}</Alert>{/if}
         {/if}
       </div>
+    {/if}
 
-      {#if loaderBuildsSupported || loaderBuildsLoading}
-        <div class="field-block">
-          <span class="label">{loaders.find((l) => l.id === loaderForm.loader)?.name || "Loader"} build</span>
-          <Segmented
-            bind:value={loaderBuildChannel}
-            size="sm"
-            options={[
-              { value: "all", label: "All" },
-              { value: "stable", label: "Stable" },
-              { value: "experimental", label: "Experimental" },
-            ]}
-            onchange={(v) => onLoaderBuildChannelChange(v)}
-          />
-          <div class="row-actions">
-            <Button size="xs" variant="outline" disabled={!loaderForm.version || loaderBuildsLoading} onclick={() => pickLatestLoaderBuild("stable")}>Latest stable{loaderBuildLatest?.stable ? ` (${loaderBuildLatest.stable})` : ""}</Button>
-            <Button size="xs" variant="outline" disabled={!loaderForm.version || loaderBuildsLoading || !loaderBuildLatest?.experimental} onclick={() => pickLatestLoaderBuild("experimental")}>Latest experimental{loaderBuildLatest?.experimental ? ` (${loaderBuildLatest.experimental})` : ""}</Button>
-          </div>
-          {#if loaderBuildsLoading}
-            <Spinner label="Loading builds…" />
-          {:else}
-            <Select bind:value={loaderForm.loaderBuild} disabled={loaderBusy || !loaderForm.version}>
-              <option value="">Select a build…</option>
-              {#each filteredModalBuilds as b}<option value={vId(b)}>{vId(b)}{(b?.stable === false || b?.channel === "experimental") ? " (experimental)" : ""}</option>{/each}
-            </Select>
-          {/if}
-        </div>
-      {/if}
+    <Switch bind:checked={loaderForm.downloadJar} label="Download the loader jar when saving" hint="Recommended. It may take a while." disabled={loaderBusy} />
 
-      <Switch bind:checked={loaderForm.downloadJar} label="Download the loader jar when saving" hint="Recommended. It may take a while." disabled={loaderBusy} />
+    <TextField
+      bind:value={loaderForm.confirmText}
+      label="Extra confirmation"
+      placeholder={confirmPhrase}
+      hint={`Type "${confirmPhrase}" to confirm.`}
+      disabled={loaderBusy}
+    />
+  </div>
 
-      <TextField
-        bind:value={loaderForm.confirmText}
-        label="Extra confirmation"
-        placeholder={confirmPhrase}
-        hint={`Type "${confirmPhrase}" to confirm.`}
-        disabled={loaderBusy}
-      />
-    </div>
-  {/snippet}
-  {#snippet footer()}
+  <svelte:fragment slot="footer">
     <Button size="sm" variant="outline" disabled={loaderBusy} onclick={() => (open = false)}>Cancel</Button>
     <Button
       size="sm"
@@ -324,8 +331,10 @@
       disabled={!loaderDirty || !loaderForm.loader || (loaderBuildsSupported && !loaderForm.loaderBuild) || loaderForm.confirmText.trim().toLowerCase() !== confirmPhrase.toLowerCase()}
       idle={!loaderDirty}
       onclick={handleChangeLoader}
-    >Apply changes</Button>
-  {/snippet}
+    >
+      Apply changes
+    </Button>
+  </svelte:fragment>
 </Modal>
 
 <style>
