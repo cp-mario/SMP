@@ -60,11 +60,9 @@
 
 {#if servers.length === 0}
   <EmptyState icon="server" title="No servers yet" description="Create your first Minecraft server to get started. Pick a loader, a version and the panel downloads and configures everything.">
-    {#snippet children()}
-      <Button size="sm" variant="primary" onclick={() => requestNewServer()}>
-        <Icon name="plus" size={14} /> Create a server
-      </Button>
-    {/snippet}
+    <Button size="sm" variant="primary" onclick={() => requestNewServer()}>
+      <Icon name="plus" size={14} /> Create a server
+    </Button>
   </EmptyState>
 {:else}
 
@@ -134,7 +132,6 @@
               {#if busyId !== s.id}<Icon name="play" size={12} />{/if} Start
             </Button>
           {/if}
-          <Button size="sm" variant="outline" onclick={() => open(s.id)}>Manage</Button>
         </div>
       </article>
     {/each}

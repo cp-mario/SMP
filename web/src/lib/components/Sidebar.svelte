@@ -32,7 +32,7 @@
     onclick={(e) => { e.preventDefault(); router.navigate("/"); }}
     aria-label="SMP panel home"
   >
-    <span class="brand-logo"><img src="/favicon.svg" alt="SMP Logo" /></span>
+    <span class="brand-logo"><img src="/icons/misc/favicon.svg" alt="SMP Logo" /></span>
     <span class="brand-text">
       <strong>SMP</strong>
       <small>Server panel</small>
@@ -100,7 +100,6 @@
       <span class="status-dot" class:offline={onlineCount === 0}></span>
       <span>{onlineCount === 0 ? "All instances stopped" : `${onlineCount} instance${onlineCount === 1 ? "" : "s"} running`}</span>
     </div>
-    <span class="footer-meta">SMP Panel</span>
   </div>
 </aside>
 
@@ -308,7 +307,6 @@
     font-size: 0.72rem;
   }
   .panel-status span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .footer-meta { color: var(--text-disabled); font-size: 0.62rem; letter-spacing: 0.06em; text-transform: uppercase; }
 
   @media (max-width: 900px) {
     .sidebar { display: none; }

@@ -462,7 +462,7 @@
     <div class="view">
       {#if booting && !appState.servers.length && view === "servers"}
         <div class="boot">
-          <span class="boot-mark" aria-hidden="true">SMP</span>
+          <img class="boot-img" src="/icons/misc/favicon.svg" alt="SMP Logo"/>
           <div class="boot-copy">
             <strong>Preparing your workspace</strong>
             <span>Loading servers…</span>
@@ -583,21 +583,19 @@
   </nav>
 
   <Modal bind:open={eulaOpen} title="Minecraft EULA" subtitle="Accept the license to start this instance" size="sm" dismissible={!eulaBusy} closeOnBackdrop={!eulaBusy} onclose={closeEula}>
-    {#snippet children()}
-      <div class="stack">
-        <Alert tone="warning" title="EULA not accepted">
-          This server has <code>eula=false</code> in its <code>eula.txt</code>. The Minecraft EULA must be accepted before it can start. Accepting only changes <code>eula.txt</code> for this server.
-        </Alert>
-        <p class="eula-copy">
-          <a href={MC_EULA_URL} target="_blank" rel="noopener noreferrer">Read the Minecraft EULA <Icon name="external-link" size={12} /></a>
-        </p>
-        <p class="muted eula-note">If you do not accept it, the server will not start.</p>
-      </div>
-    {/snippet}
-    {#snippet footer()}
+    <div class="stack">
+      <Alert tone="warning" title="EULA not accepted">
+        This server has <code>eula=false</code> in its <code>eula.txt</code>. The Minecraft EULA must be accepted before it can start. Accepting only changes <code>eula.txt</code> for this server.
+      </Alert>
+      <p class="eula-copy">
+        <a href={MC_EULA_URL} target="_blank" rel="noopener noreferrer">Read the Minecraft EULA <Icon name="external-link" size={12} /></a>
+      </p>
+      <p class="muted eula-note">If you do not accept it, the server will not start.</p>
+    </div>
+    <svelte:fragment slot="footer">
       <button class="btn btn-outline btn-sm" type="button" disabled={eulaBusy} onclick={closeEula}>Do not accept</button>
       <button class="btn btn-primary btn-sm" type="button" disabled={eulaBusy} onclick={handleEulaAccept}>{eulaBusy ? "Working…" : (eulaAction === "restart" ? "Accept and restart" : "Accept and start")}</button>
-    {/snippet}
+    </svelte:fragment>
   </Modal>
 
   <ConfirmDialog
@@ -628,20 +626,12 @@
   }
   .skip-link:focus { transform: none; }
   .boot { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 80px 0; color: var(--text-secondary); font-size: 0.9rem; }
-  .boot-mark {
+  .boot-img {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     width: 34px;
     height: 34px;
-    color: #fff;
-    font-size: 0.62rem;
-    font-weight: 800;
-    letter-spacing: 0.03em;
-    background: linear-gradient(135deg, var(--accent-hover), var(--accent-dark));
-    border: 1px solid color-mix(in srgb, var(--accent) 60%, #fff);
-    border-radius: 9px;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.24), 0 8px 18px -10px var(--accent);
   }
   .boot-copy { display: flex; flex-direction: column; line-height: 1.3; }
   .boot-copy strong { color: var(--text); font-size: 0.86rem; font-weight: 650; }
