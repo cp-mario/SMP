@@ -1200,19 +1200,17 @@
   />
 
   <Modal bind:open={storeOpen} title="Add mods & plugins" subtitle={server ? `${server.name} · ${server.loader || "vanilla"} ${server.loader_version || ""}` : ""} size="full" onclose={() => { storeOpen = false; }}>
-    {#snippet children()}
-      {#if server}
-        <StoreBrowser
-          servers={[{ id: server.id, name: server.name, loader: server.loader, loader_version: server.loader_version }]}
-          {systemInfo}
-          bind:targetServerId={storeTarget}
-          onInstalled={() => { loadDetail({ quiet: true }); loadModUpdatesList({ force: true }); }}
-        />
-      {/if}
-    {/snippet}
-    {#snippet footer()}
+    {#if server}
+      <StoreBrowser
+        servers={[{ id: server.id, name: server.name, loader: server.loader, loader_version: server.loader_version }]}
+        {systemInfo}
+        bind:targetServerId={storeTarget}
+        onInstalled={() => { loadDetail({ quiet: true }); loadModUpdatesList({ force: true }); }}
+      />
+    {/if}
+    <svelte:fragment slot="footer">
       <Button size="sm" variant="outline" onclick={() => { storeOpen = false; }}>Close</Button>
-    {/snippet}
+    </svelte:fragment>
   </Modal>
 
   <Modal
@@ -1224,7 +1222,7 @@
     closeOnBackdrop={!rawBusy}
     onclose={() => { showRawModal = false; }}
   >
-    {#snippet children()}
+    <svelte:fragment slot="children">
       <div class="raw-stack">
         <Alert tone="danger" title="Advanced — this can break the server">
           <b>Do not edit these values unless you know exactly what you are doing.</b>
@@ -1260,8 +1258,8 @@
           <span>I understand that saving wrong values can damage this server and that there is no undo.</span>
         </label>
       </div>
-    {/snippet}
-    {#snippet footer()}
+    </svelte:fragment>
+    <svelte:fragment slot="footer">
       <Button size="sm" variant="outline" disabled={rawBusy} onclick={() => { showRawModal = false; }}>Cancel</Button>
       <Button
         size="sm"
@@ -1271,7 +1269,7 @@
         idle={rawText === rawOriginal || !rawAck}
         onclick={saveRawConfig}
       ><Icon name="save" size={13} /> Save raw values</Button>
-    {/snippet}
+    </svelte:fragment>
   </Modal>
 {/if}
 

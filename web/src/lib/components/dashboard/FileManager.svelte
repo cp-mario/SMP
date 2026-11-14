@@ -517,51 +517,51 @@
 {/if}
 
 <Modal bind:open={showRenameModal} title="Rename" size="sm">
-  {#snippet children()}
+  <div slot="children">
     <TextField bind:value={renameValue} label="New name" onkeydown={(e) => e.key === "Enter" && doRename()} />
-  {/snippet}
-  {#snippet footer()}
+  </div>
+  <div slot="footer">
     <Button size="sm" variant="outline" onclick={() => (showRenameModal = false)}>Cancel</Button>
     <Button size="sm" variant="primary" onclick={doRename}>Rename</Button>
-  {/snippet}
+  </div>
 </Modal>
 
 <Modal bind:open={showDeleteModal} title="Delete" size="sm" onclose={() => { showDeleteModal = false; }}>
-  {#snippet children()}
+  <div slot="children">
     <Alert tone="danger">
       Delete <b>{deleteTarget?.name}</b>{deleteTarget?.isDirectory ? " and everything inside it" : ""}? This cannot be undone.
     </Alert>
-  {/snippet}
-  {#snippet footer()}
+  </div>
+  <div slot="footer">
     <Button size="sm" variant="outline" disabled={deleteBusy} onclick={() => (showDeleteModal = false)}>Cancel</Button>
     <Button size="sm" variant="danger" loading={deleteBusy} onclick={confirmDelete}><Icon name="trash" size={13} /> Delete</Button>
-  {/snippet}
+  </div>
 </Modal>
 
 <Modal bind:open={showEditModal} title={editFileName} size="xl" onclose={() => (showEditModal = false)}>
-  {#snippet children()}
+  <div slot="children">
     <div class="fm-editor-wrap">
       {#if CodeEditor}
         <CodeEditor bind:value={editContent} filename={editFileName} dirty={editDirty} onSave={saveEdit} onClose={() => (showEditModal = false)} />
       {/if}
     </div>
-  {/snippet}
-  {#snippet footer()}
+  </div>
+  <div slot="footer">
     <Button size="sm" variant="outline" href={apiDownloadUrl(relPath(editFileName))}><Icon name="download" size={13} /> Download</Button>
     <Button size="sm" variant="primary" disabled={!editDirty} idle={!editDirty} onclick={saveEdit}><Icon name="save" size={13} /> Save</Button>
-  {/snippet}
+  </div>
 </Modal>
 
 <Modal bind:open={showViewModal} title={viewFileName} size="lg" onclose={() => (showViewModal = false)}>
-  {#snippet children()}
+  <div slot="children">
     <div class="fm-preview">
       <img src={viewFileUrl} alt={viewFileName} />
     </div>
-  {/snippet}
-  {#snippet footer()}
+  </div>
+  <div slot="footer">
     <Button size="sm" variant="outline" onclick={() => (showViewModal = false)}>Close</Button>
     <Button size="sm" variant="primary" href={apiDownloadUrl(relPath(viewFileName))}><Icon name="download" size={13} /> Download</Button>
-  {/snippet}
+  </div>
 </Modal>
 
 <style>

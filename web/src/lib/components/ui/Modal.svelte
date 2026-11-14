@@ -131,9 +131,19 @@
           {/if}
         </div>
       {/if}
-      <div class="modal-body">{@render children?.()}</div>
+      <div class="modal-body">
+        {#if children}
+          {@render children?.()}
+        {:else if $$slots.children}
+          <slot name="children" />
+        {:else}
+          <slot />
+        {/if}
+      </div>
       {#if footer}
         <div class="form-actions modal-footer">{@render footer()}</div>
+      {:else if $$slots.footer}
+        <div class="form-actions modal-footer"><slot name="footer" /></div>
       {/if}
     </div>
   </div>
