@@ -3,7 +3,7 @@ import dgram from "node:dgram";
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { db } from "./db.js";
+import { db, query, queryOne } from "./db.js";
 
 /**
  * Port management for Minecraft servers.
@@ -130,36 +130,60 @@ export function migrateServerPorts() {
       if (port) insert.run(row.id, desc.role, port, desc.protocol);
     }
   }
+  // The migration may have just seeded rows, so cached port lists are stale.
+  invalidatePortCache();
 }
 
 // ---------- Lookups ----------
 
+/**
+ * Resolved port rows for a server.
+ *
+ * This is read on every server-list and server-detail request. Reservations
+ * only change through the port routes, which invalidate the entry, so a cache
+ * here removes two queries per server per poll without staleness.
+ */
+const portCache = new Map();
+
+function invalidatePortCache(serverId = null) {
+  if (serverId === null) portCache.clear();
+  else portCache.delete(serverId);
+}
+
 export function getServerPorts(serverId) {
-  const rows = db.prepare(
-    "SELECT role, port, protocol FROM server_ports WHERE server_id = ? ORDER BY rowid ASC"
-  ).all(serverId);
+  const cached = portCache.get(serverId);
+  if (cached) return cached.map((p) => ({ ...p }));
+  const rows = query(
+    "SELECT role, port, protocol FROM server_ports WHERE server_id = ? ORDER BY rowid ASC",
+    serverId,
+  );
+  let list;
   if (rows.length) {
-    return rows.map((r) => ({
+    list = rows.map((r) => ({
       role: r.role,
       port: Number(r.port),
       protocol: protocolOf(r.protocol),
     }));
+  } else {
+    const server = queryOne("SELECT loader, port FROM servers WHERE id = ?", serverId);
+    if (!server) return [];
+    const game = portProfile(server.loader).find((p) => p.role === "game");
+    list = [{
+      role: "game",
+      port: isPortNumber(server.port) ? Number(server.port) : game.defaultPort,
+      protocol: game.protocol,
+    }];
   }
-  const server = db.prepare("SELECT loader, port FROM servers WHERE id = ?").get(serverId);
-  if (!server) return [];
-  const game = portProfile(server.loader).find((p) => p.role === "game");
-  return [{
-    role: "game",
-    port: isPortNumber(server.port) ? Number(server.port) : game.defaultPort,
-    protocol: game.protocol,
-  }];
+  portCache.set(serverId, list);
+  return list.map((p) => ({ ...p }));
 }
 
 /** Extra ports reserved for plugins (Geyser, voice chat, Dynmap, ...). */
 export function getServerExtraPorts(serverId) {
-  return db.prepare(
-    "SELECT id, label, port, protocol FROM server_extra_ports WHERE server_id = ? ORDER BY rowid ASC"
-  ).all(serverId).map((r) => ({
+  return query(
+    "SELECT id, label, port, protocol FROM server_extra_ports WHERE server_id = ? ORDER BY rowid ASC",
+    serverId,
+  ).map((r) => ({
     id: r.id,
     label: r.label,
     port: Number(r.port),
@@ -168,8 +192,10 @@ export function getServerExtraPorts(serverId) {
 }
 
 /** All reservations held by other servers, keyed by `protocol:port`. */
-function usedPorts(excludeServerId = null) {
-  const rows = db.prepare(`
+/** All reservations held by other servers, keyed by `protocol:port`. */
+export function usedPorts(excludeServerId = null, into = null) {
+  const map = into || new Map();
+  const rows = query(`
     SELECT sp.server_id, sp.role, sp.port, sp.protocol, s.name AS server_name, NULL AS extra_id
     FROM server_ports sp
     LEFT JOIN servers s ON s.id = sp.server_id
@@ -177,8 +203,7 @@ function usedPorts(excludeServerId = null) {
     SELECT ep.server_id, ep.label AS role, ep.port, ep.protocol, s.name AS server_name, ep.id AS extra_id
     FROM server_extra_ports ep
     LEFT JOIN servers s ON s.id = ep.server_id
-  `).all();
-  const map = new Map();
+  `);
   for (const row of rows) {
     if (excludeServerId && row.server_id === excludeServerId) continue;
     map.set(portKey(row.protocol, row.port), {
@@ -197,7 +222,7 @@ function usedPorts(excludeServerId = null) {
 export function findPortOwner(port, protocol, { excludeExtraId = null, excludeServerId = null } = {}) {
   if (!isPortNumber(port)) return null;
   const proto = protocolOf(protocol);
-  const rows = db.prepare(`
+  const rows = query(`
     SELECT sp.server_id, sp.role, sp.port, sp.protocol, s.name AS server_name, NULL AS extra_id
     FROM server_ports sp
     LEFT JOIN servers s ON s.id = sp.server_id
@@ -207,7 +232,7 @@ export function findPortOwner(port, protocol, { excludeExtraId = null, excludeSe
     FROM server_extra_ports ep
     LEFT JOIN servers s ON s.id = ep.server_id
     WHERE ep.port = ? AND ep.protocol = ?
-  `).all(Number(port), proto, Number(port), proto);
+  `, Number(port), proto, Number(port), proto);
   const row = rows.find((r) =>
     !(excludeExtraId && r.extra_id === excludeExtraId) &&
     !(excludeServerId && r.server_id === excludeServerId)
@@ -227,16 +252,19 @@ export function insertServerExtraPort({ serverId, label, port, protocol }) {
   const id = randomUUID();
   db.prepare("INSERT INTO server_extra_ports(id, server_id, label, port, protocol) VALUES(?,?,?,?,?)")
     .run(id, serverId, label, Number(port), protocolOf(protocol));
+  invalidatePortCache(serverId);
   return { id, label, port: Number(port), protocol: protocolOf(protocol) };
 }
 
 export function updateServerExtraPort(serverId, id, { port }) {
   db.prepare("UPDATE server_extra_ports SET port = ? WHERE id = ? AND server_id = ?")
     .run(Number(port), id, serverId);
+  invalidatePortCache(serverId);
 }
 
 export function deleteServerExtraPort(serverId, id) {
   db.prepare("DELETE FROM server_extra_ports WHERE server_id = ? AND id = ?").run(serverId, id);
+  invalidatePortCache(serverId);
 }
 
 /**
@@ -249,6 +277,7 @@ export function deleteServerPorts(serverId) {
     db.prepare("DELETE FROM server_extra_ports WHERE server_id = ?").run(id);
   });
   remove(serverId);
+  invalidatePortCache(serverId);
 }
 
 function nextFreeFromDb(start, protocol, used) {
@@ -469,14 +498,20 @@ export function saveServerPorts(serverId, ports) {
     if (game) db.prepare("UPDATE servers SET port = ? WHERE id = ?").run(Number(game.port), serverId);
   });
   write();
+  invalidatePortCache(serverId);
 }
 
-/** Resolved ports plus collision and label information for API/UI consumers. */
-export function serverPortsStatus(row) {
+/**
+ * Resolved ports plus collision and label information for API/UI consumers.
+ *
+ * `shared` lets a caller resolve every server with one reservation snapshot
+ * instead of two queries per server.
+ */
+export function serverPortsStatus(row, shared = null) {
   if (!row?.id) return [];
   const profile = portProfile(row.loader);
   const labels = new Map(profile.map((p) => [p.role, p]));
-  const used = usedPorts(row.id);
+  const used = shared || usedPorts(row.id);
   const conflictOf = (port, protocol) => {
     const other = used.get(portKey(protocol, port)) || null;
     return other ? { serverId: other.serverId, serverName: other.serverName, role: other.role } : null;

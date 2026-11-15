@@ -1,6 +1,10 @@
 import { createHash } from "crypto";
 import { createReadStream, readFileSync } from "fs";
 import { fetchWithTimeout } from "../loaders/BaseLoader.js";
+import { createTtlCache } from "../cache.js";
+
+const JSON_HEADERS = { Accept: "application/json" };
+const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
 export class StoreError extends Error {
   constructor(message, { status = 0, code = "", data = null } = {}) {
@@ -12,11 +16,51 @@ export class StoreError extends Error {
   }
 }
 
-const JSON_HEADERS = { Accept: "application/json" };
-const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+/**
+ * Short-lived response cache for store lookups.
+ *
+ * Store clients (Modrinth/Hangar/Spiget/FTB) are hit for search, project
+ * metadata, version lists and hash lookups. The same project is fetched
+ * repeatedly while the user browses, and `latestVersion()` always re-reads the
+ * full version list, so identical requests are coalesced and reused.
+ */
+const TTL_MS = Number(process.env.SMP_STORE_CACHE_MS) || 3 * 60 * 1000;
+const storeCache = createTtlCache({ ttlMs: TTL_MS, maxEntries: 256, name: "store-json" });
+
+export function clearStoreCache() {
+  storeCache.invalidate();
+}
+
+export function storeCacheStats() {
+  return storeCache.stats();
+}
+
+export function cacheKey(url, headers) {
+  const relevant = Object.entries(headers || {})
+    .filter(([k]) => k.toLowerCase() !== "user-agent")
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([k, v]) => `${k}=${v}`)
+    .join("&");
+  return relevant ? `${url}?${relevant}` : url;
+}
 
 export function withUserAgent(headers = {}) {
   return { "User-Agent": BROWSER_UA, ...headers };
+}
+
+function fetchJsonCached(url, { headers = {}, timeoutMs = 30000 } = {}) {
+  const key = `${cacheKey(url, headers)}|${timeoutMs}`;
+  return storeCache.wrap(key, async () => {
+    const res = await fetchWithTimeout(url, { headers: withUserAgent({ ...JSON_HEADERS, ...headers }), timeoutMs });
+    if (!res.ok) {
+      let detail = "";
+      try {
+        detail = (await res.text()).slice(0, 300);
+      } catch { /* ignore */ }
+      throw new StoreError(`HTTP ${res.status} for ${url}${detail ? `: ${detail}` : ""}`, { status: res.status });
+    }
+    return await res.json();
+  });
 }
 
 export async function getJsonWithMeta(url, { headers = {}, timeoutMs = 30000 } = {}) {
@@ -24,8 +68,7 @@ export async function getJsonWithMeta(url, { headers = {}, timeoutMs = 30000 } =
   if (!res.ok) {
     let detail = "";
     try {
-      const body = await res.text();
-      detail = body.slice(0, 300);
+      detail = (await res.text()).slice(0, 300);
     } catch { /* ignore */ }
     throw new StoreError(`HTTP ${res.status} for ${url}${detail ? `: ${detail}` : ""}`, { status: res.status });
   }
@@ -33,8 +76,7 @@ export async function getJsonWithMeta(url, { headers = {}, timeoutMs = 30000 } =
 }
 
 export async function getJson(url, { headers = {}, timeoutMs = 30000 } = {}) {
-  const { data } = await getJsonWithMeta(url, { headers, timeoutMs });
-  return data;
+  return await fetchJsonCached(url, { headers, timeoutMs });
 }
 
 export async function getText(url, { headers = {}, timeoutMs = 30000 } = {}) {

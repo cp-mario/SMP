@@ -31,6 +31,9 @@
 
   async function poll() {
     if (destroyed || inFlight) return;
+    // A hidden tab must not keep sampling: the chart is not visible and the
+    // server-side work (a process query per sample) is pure waste.
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
     inFlight = true;
     try {
       const s = await api(`/servers/${serverId}/stats`, { retries: 0, timeout: 6000 });
@@ -57,13 +60,22 @@
     timer = setTimeout(loop, isOnline ? POLL_MS : OFFLINE_POLL_MS);
   }
 
+  function onVisible() {
+    if (typeof document === "undefined" || document.visibilityState !== "visible") return;
+    // Catch up immediately instead of waiting for the next tick.
+    if (timer) { clearTimeout(timer); timer = null; }
+    loop();
+  }
+
   onMount(() => {
     loop();
+    document?.addEventListener?.("visibilitychange", onVisible);
   });
 
   onDestroy(() => {
     destroyed = true;
     if (timer) clearTimeout(timer);
+    document?.removeEventListener?.("visibilitychange", onVisible);
   });
 
   const cpuMax = $derived(Math.max(100, ...cpuHistory));

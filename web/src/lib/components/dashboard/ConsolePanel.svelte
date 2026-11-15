@@ -64,8 +64,14 @@
 
   function append(newLines) {
     if (!newLines?.length) return;
+    // Keep the array stable when the buffer is not full: growing a plain array
+    // in place is far cheaper than copying 3000 entries per burst.
     const mapped = newLines.map(makeLine);
-    lines = [...lines, ...mapped].slice(-MAX_LINES);
+    if (lines.length + mapped.length <= MAX_LINES) {
+      lines = lines.concat(mapped);
+    } else {
+      lines = lines.concat(mapped).slice(-MAX_LINES);
+    }
     scroll();
   }
 
@@ -93,14 +99,19 @@
 
   function startPolling() {
     if (pollTimer || destroyed) return;
-    pollTimer = setInterval(async () => {
+    // Fallback only (the SSE stream is the normal path): a slow tick keeps the
+    // panel cheap when no output is arriving.
+    const tick = async () => {
       if (destroyed) return;
+      // A hidden tab does not need live output.
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
       try {
         const res = await api(`/servers/${serverId}/logs?after=${next}`, { retries: 0, timeout: 8000 });
         if (Array.isArray(res.lines) && res.lines.length) append(res.lines);
         if (Number.isFinite(res.next)) next = res.next;
       } catch { /* transient */ }
-    }, 1500);
+    };
+    pollTimer = setInterval(tick, 2000);
   }
 
   function scheduleReconnect() {
@@ -145,6 +156,10 @@
             }
           }
           next = Number.isFinite(d.next) ? d.next : next;
+        } else if (Array.isArray(d.lines)) {
+          // Batched event: one payload carrying several lines.
+          append(d.lines);
+          if (Number.isFinite(d.next)) next = d.next;
         } else if (d.line != null) {
           append([d.line]);
           if (Number.isFinite(d.n)) next = d.n + 1;

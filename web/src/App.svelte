@@ -120,10 +120,31 @@
         const prev = new Map(appState.servers.map((s) => [s.id, s.update]));
         for (const s of next) if (s.update == null && prev.has(s.id)) s.update = prev.get(s.id);
       }
-      appState.servers = next;
+      // The list is rebuilt on every poll; skip the state write (and the
+      // re-render of every card) when nothing actually changed.
+      if (!sameServers(appState.servers, next)) appState.servers = next;
     } catch (e) {
       if (!silent) toasts.error("Could not load servers", e);
     }
+  }
+
+  function sameServers(a, b) {
+    if (a === b) return true;
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+      if (a[i] !== b[i]) {
+        // Different object identities: compare the fields the cards render.
+        const x = a[i] || {}, y = b[i] || {};
+        if (x.id !== y.id || x.online !== y.online || x.name !== y.name
+          || x.loader !== y.loader || x.loader_version !== y.loader_version
+          || x.loader_build !== y.loader_build || x.memory_max !== y.memory_max
+          || x.port !== y.port || x.has_icon !== y.has_icon
+          || x.icon_version !== y.icon_version
+          || x.update?.recommended !== y.update?.recommended
+          || x.update?.build?.recommended !== y.update?.build?.recommended) return false;
+      }
+    }
+    return true;
   }
 
   async function init() {

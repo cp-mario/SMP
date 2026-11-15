@@ -43,6 +43,7 @@
   let activeTab = $state("console");
   let busy = $state("");
   let statusTimer = null;
+  let destroyed = false;
   let cleanupExtra = null;
 
   let sftp = $state(null);
@@ -286,26 +287,38 @@
       await Promise.all([loadDetail({ updates: true }), loadSftp()]);
       if (cancelled) return;
       // Polling only while the tab is visible: a background panel should not keep
-      // hitting the API every 5 s (battery / CPU / server load).
+      // hitting the API (battery / CPU / server load). A recursive timeout that
+      // reschedules only while visible actually stops the work; setInterval keeps
+      // firing (throttled to ~1/min, but still) in a hidden tab.
       const poll = () => {
-        if (document.visibilityState === "hidden") return;
-        loadDetail({ quiet: true }); loadSftp();
+        if (destroyed) return;
+        if (document.visibilityState === "visible") {
+          loadDetail({ quiet: true }); loadSftp();
+        }
+        statusTimer = setTimeout(poll, 5000);
       };
-      statusTimer = setInterval(poll, 5000);
+      statusTimer = setTimeout(poll, 5000);
       const onSrv = () => loadDetail({ quiet: true });
-      const onVisible = () => { if (document.visibilityState === "visible") poll(); };
+      const onVisible = () => {
+        if (document.visibilityState !== "visible") return;
+        if (statusTimer) { clearTimeout(statusTimer); statusTimer = null; }
+        poll();
+      };
       window.addEventListener("smp:server-changed", onSrv);
       document.addEventListener("visibilitychange", onVisible);
       cleanupExtra = () => {
-        if (statusTimer) clearInterval(statusTimer);
+        if (statusTimer) clearTimeout(statusTimer);
+        statusTimer = null;
         window.removeEventListener("smp:server-changed", onSrv);
         document.removeEventListener("visibilitychange", onVisible);
       };
     })();
-    return () => { cancelled = true; cleanupExtra?.(); };
+    return () => { destroyed = true; cancelled = true; cleanupExtra?.(); };
   });
 
   onDestroy(() => {
+    destroyed = true;
+    if (statusTimer) clearTimeout(statusTimer);
     if (sftpCopyTimer) clearTimeout(sftpCopyTimer);
   });
 

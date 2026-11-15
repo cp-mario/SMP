@@ -8,25 +8,59 @@ mkdirSync(DATA_DIR, { recursive: true });
 
 let _db = null;
 
-// Single entry point: the module-level `db` below is the only connection.
+// WAL + NORMAL keeps writes durable across app crashes without an fsync per commit.
+const WRITE_PRAGMAS = `
+  PRAGMA journal_mode = WAL;
+  PRAGMA busy_timeout = 5000;
+  PRAGMA foreign_keys = ON;
+  PRAGMA synchronous = NORMAL;
+  PRAGMA temp_store = MEMORY;
+  PRAGMA cache_size = -8000;
+`;
+
 function openDb() {
   if (_db) return _db;
   _db = new Database(path.join(DATA_DIR, "smp.sqlite"));
-  try { _db.exec("PRAGMA journal_mode = WAL"); } catch {}
-  try { _db.exec("PRAGMA busy_timeout = 5000"); } catch {}
-  try { _db.exec("PRAGMA foreign_keys = ON"); } catch {}
-  // WAL + NORMAL keeps writes durable across app crashes without an fsync per commit.
-  try { _db.exec("PRAGMA synchronous = NORMAL"); } catch {}
-  try { _db.exec("PRAGMA temp_store = MEMORY"); } catch {}
-  try { _db.exec("PRAGMA cache_size = -8000"); } catch {}
+  try { _db.exec(WRITE_PRAGMAS); } catch {}
   initDb(_db);
   return _db;
+}
+
+/**
+ * Read-only statement helpers.
+ *
+ * `db` is the single connection, so every read is synchronous and costs
+ * microseconds. The statement handles are cached anyway: `prepare()` re-parses
+ * the SQL, and the panel repeats a handful of queries on every 1-5 s poll.
+ */
+const stmtCache = new Map();
+function stmt(sql) {
+  let prepared = stmtCache.get(sql);
+  if (!prepared) { prepared = db.prepare(sql); stmtCache.set(sql, prepared); }
+  return prepared;
+}
+
+/** Read every row for `sql`, with cached statement handles. */
+function query(sql, ...args) {
+  return stmt(sql).all(...args);
+}
+
+/** Read the first row for `sql`, or undefined. */
+function queryOne(sql, ...args) {
+  return stmt(sql).get(...args);
+}
+
+function clearStatements() {
+  for (const prepared of stmtCache.values()) { try { prepared.finalize(); } catch {} }
+  stmtCache.clear();
 }
 
 const SCHEMA_VERSION = 5;
 
 // Initialize immediately to avoid Proxy issues with Bun's Database
 const db = openDb();
+
+export { db, query, queryOne };
 
 export function initDb(conn = db) {
   conn.exec(`
@@ -126,8 +160,6 @@ export function initDb(conn = db) {
   try { conn.exec("CREATE INDEX IF NOT EXISTS idx_modpacks_server ON modpacks(server_id)"); } catch {}
 }
 
-export { db };
-
 /**
  * Wipes every table and recreates the schema, leaving the database as it looks
  * on a fresh install. The file itself is kept: Windows keeps SQLite files
@@ -146,15 +178,75 @@ export function resetDatabase() {
   }
   try { db.exec("PRAGMA foreign_keys = ON"); } catch {}
   initDb(db);
+  // The pooled readers have no statements to reuse after the tables are gone.
+  clearStatements();
+  invalidateSettings();
   // Reclaim the space the deleted rows used to occupy.
   try { db.exec("VACUUM"); } catch {}
 }
 
-export function getSetting(key, def) {
-  const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key);
-  return row ? row.value : def;
+// ---------- Settings ----------
+/**
+ * Settings are read on nearly every request (CORS origins, port guard flags,
+ * update channel, SFTP flags). A small write-through cache keeps those reads
+ * off the hot path; `setSetting` updates it in the same tick, so readers never
+ * observe a stale value.
+ */
+const settingCache = new Map();
+const SETTING_CACHE_MAX = 512;
+let settingCacheLoaded = false;
+
+function loadSettingCache() {
+  if (settingCacheLoaded) return;
+  settingCacheLoaded = true;
+  try {
+    for (const row of db.prepare("SELECT key, value FROM settings").all()) {
+      settingCache.set(row.key, row.value);
+    }
+  } catch { /* first boot: table is created by initDb */ }
 }
+
+export function getSetting(key, def) {
+  if (!settingCacheLoaded) loadSettingCache();
+  if (settingCache.has(key)) return settingCache.get(key);
+  const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key);
+  if (!row) return def;
+  if (settingCache.size >= SETTING_CACHE_MAX) settingCache.clear();
+  settingCache.set(key, row.value);
+  return row.value;
+}
+
 export function setSetting(key, value) {
   db.prepare("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(key, value);
+  settingCache.set(key, value);
 }
+
+/** Removes one setting from the database and the cache. */
+export function deleteSetting(key) {
+  db.prepare("DELETE FROM settings WHERE key = ?").run(key);
+  settingCache.delete(key);
+}
+
+/**
+ * Removes settings matching a `LIKE` pattern and drops them from the cache.
+ * `prefix%` is the only form used by the panel, so the simple prefix check
+ * avoids emulating SQL LIKE.
+ */
+export function deleteSettingsLike(pattern) {
+  const removed = db.prepare("DELETE FROM settings WHERE key LIKE ?").run(pattern);
+  const text = String(pattern);
+  const prefix = text.endsWith("%") ? text.slice(0, -1) : null;
+  for (const key of [...settingCache.keys()]) {
+    const hit = prefix !== null ? key.startsWith(prefix) : key === text;
+    if (hit) settingCache.delete(key);
+  }
+  return removed;
+}
+
+/** Drops cached settings (used by resetDatabase and cross-process edits). */
+export function invalidateSettings() {
+  settingCache.clear();
+  settingCacheLoaded = false;
+}
+
 export function genId() { return crypto.randomUUID(); }

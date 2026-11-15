@@ -9,6 +9,7 @@ import { PumpkinMCLoader } from "./pumpkinmc.js";
 import { EndstoneLoader } from "./endstone.js";
 import { BedrockLoader } from "./bedrock.js";
 import { CustomLoader } from "./custom.js";
+import { enableLoaderCache } from "./BaseLoader.js";
 
 export const loaderClasses = [
   VanillaLoader,
@@ -26,7 +27,11 @@ export const loaderClasses = [
   CustomLoader,
 ];
 
-export const loaders = Object.fromEntries(loaderClasses.map((C) => [C.id, new C()]));
+// Every loader instance answers version/build lists through the shared TTL
+// cache, so the 5 s dashboard poll and the create-server modal share requests.
+export const loaders = Object.fromEntries(
+  loaderClasses.map((C) => [C.id, enableLoaderCache(new C())]),
+);
 
 export function getLoader(id) {
   return loaders[String(id || "").toLowerCase()] || null;

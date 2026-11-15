@@ -4,13 +4,42 @@ import { join } from "path";
 import { pipeline } from "stream";
 import { Readable } from "stream";
 import { promisify } from "util";
+import { loaderBuildsCache, loaderVersionsCache } from "../cache.js";
 
 const streamPipeline = promisify(pipeline);
 const FETCH_TIMEOUT = 45000;
 const UA = "SMP-Panel/1.0 (+https://github.com/SMP-Panel)";
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
-function mergeHeaders(options = {}) {
+/**
+   * Loaders hit public release APIs. Caching the parsed lists keeps the panel's
+   * own traffic (dashboard poll + create-server modal + settings) to one request
+   * per loader instead of one per call.
+   */
+const VERSION_TTL_MS = Number(process.env.SMP_VERSION_CACHE_MS) || 5 * 60 * 1000;
+const BUILD_TTL_MS = Number(process.env.SMP_BUILD_CACHE_MS) || 3 * 60 * 1000;
+
+/**
+ * Installs the cached wrappers for a loader instance. Called by
+ * `loaders/index.js` right after construction (idempotent).
+ */
+export function enableLoaderCache(loader) {
+  loader.__installCache?.();
+  return loader;
+}
+
+/** Drops cached version/build lists (used after a download changes the row). */
+export function invalidateLoaderCache(loaderId = "") {
+  if (!loaderId) {
+    loaderVersionsCache.invalidate();
+    loaderBuildsCache.invalidate();
+    return;
+  }
+  loaderVersionsCache.invalidate(loaderId);
+  loaderBuildsCache.deleteMatching(`${loaderId}:`);
+}
+
+export function mergeHeaders(options = {}) {
   const h = { "User-Agent": UA, Accept: "application/json,text/*,*/*", ...(options.headers || {}) };
   return { ...options, headers: h };
 }
@@ -140,6 +169,29 @@ export class BaseLoader {
 
   constructor() {
     if (new.target === BaseLoader) throw new Error("BaseLoader is abstract");
+  }
+
+  /**
+   * Cached wrappers are installed once here, so subclasses keep implementing the
+   * plain `getVersions()` / `getLoaderVersions()` without knowing about caching.
+   * The dashboard poll, the create-server modal and the update checks all ask
+   * for the same lists; without the cache each one is an upstream API call.
+   */
+  __installCache() {
+    if (this.__cached) return;
+    this.__cached = true;
+    const id = this.id;
+    const rawVersions = this.getVersions.bind(this);
+    const rawBuilds = this.getLoaderVersions.bind(this);
+    this.getVersions = ({ force = false } = {}) => {
+      if (force) loaderVersionsCache.invalidate(id);
+      return loaderVersionsCache.wrap(id, rawVersions, { ttl: VERSION_TTL_MS });
+    };
+    this.getLoaderVersions = (version, { force = false } = {}) => {
+      const key = `${id}:${String(version || "")}`;
+      if (force) loaderBuildsCache.invalidate(key);
+      return loaderBuildsCache.wrap(key, () => rawBuilds(version), { ttl: BUILD_TTL_MS });
+    };
   }
 
   get id() { return this.constructor.id; }

@@ -7,13 +7,13 @@ const serverPath = (id) => encodeURIComponent(id);
 const modPath = (serverId, modId) => `/servers/${encodeURIComponent(serverId)}/mods/${encodeURIComponent(modId)}`;
 
 export async function loadServers({ updates = false } = {}) {
-  const { servers } = await api(`/servers${updates ? "?updates=1" : ""}`);
+  const { servers } = await api(`/servers${updates ? "?updates=1" : ""}`, { cache: true });
   return servers || [];
 }
 
 export async function loadServer(id, { updates = true } = {}) {
-  const data = await api(`/servers/${serverPath(id)}${updates ? "?updates=1" : "?updates=0"}`);
-  return data.server || data;
+  const data = await api(`/servers/${serverPath(id)}${updates ? "?updates=1" : "?updates=0"}`, { cache: true });
+  return data?.server || data || null;
 }
 
 export async function loadLoaders() {

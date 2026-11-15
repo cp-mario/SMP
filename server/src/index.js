@@ -1,7 +1,7 @@
 import { Elysia } from "elysia";
 import { cors } from "@elysiajs/cors";
 
-import { getSetting, setSetting, db, resetDatabase } from "./db.js";
+import { getSetting, setSetting, db, resetDatabase, deleteSetting, deleteSettingsLike, query, queryOne } from "./db.js";
 import { readFileSync, readdirSync, statSync, existsSync, writeFileSync, mkdirSync, createWriteStream,
   unlinkSync, rmdirSync, rmSync, appendFileSync, renameSync } from "fs";
 import { readdir, stat } from "fs/promises";
@@ -15,13 +15,15 @@ import { getSftpInfo, setSftpPassword, startSftpServer, stopSftpServer, getSftpS
 import { createBackupArchive, extractBackupArchive, convertZipToTarZst, tarZstToZip, BACKUP_FORMAT } from "./backups.js";
 import { AVAILABLE_JAVA_VERSIONS, detectJava, listInstalledJava, installJava, uninstallJava, resolveJavaCommand, resolveJavaForServer, defaultJavaId, getInstalledJavaHome } from "./java.js";
 import { getLoader, listLoaders, loaderIds, requiresEula } from "./loaders/index.js";
+import { invalidateLoaderCache } from "./loaders/BaseLoader.js";
 import { listSources, searchStore, getProject, getVersions, lookupHash, findModUpdates, findModUpdate, latestVersion, resolveDownload, sourceConfigured, getSource } from "./mods/index.js";
 import { installModpack, downloadFile } from "./mods/packs.js";
 import { sha1File, sha256File, fingerprintFile } from "./mods/http.js";
 import { modsTarget, folderForTarget } from "./mods/loaders.js";
-import { portProfile, isPortNumber, isPortBindable, allocateServerPorts, saveServerPorts, applyPortsToConfig, checkServerStartupPorts, serverPortsStatus, formatPortConflict, migrateServerPorts, PortConflictError, findPortOwner, insertServerExtraPort, updateServerExtraPort, deleteServerExtraPort, deleteServerPorts, getServerExtraPorts } from "./ports.js";
+import { portProfile, isPortNumber, isPortBindable, allocateServerPorts, saveServerPorts, applyPortsToConfig, checkServerStartupPorts, serverPortsStatus, formatPortConflict, migrateServerPorts, PortConflictError, findPortOwner, insertServerExtraPort, updateServerExtraPort, deleteServerExtraPort, deleteServerPorts, getServerExtraPorts, usedPorts } from "./ports.js";
 import { startPortGuard, stopPortGuard } from "./portGuard.js";
 import { appVersion, getUpdateState, applyUpdate, normalizeChannel, defaultChannel } from "./version.js";
+import { compressResponse, jsonResponse, fileResponse } from "./http.js";
 
 const streamPipeline = promisify(pipeline);
 const execFileAsync = promisify(execFile);
@@ -246,7 +248,7 @@ function serverIconVersion(id) {
   try { return Math.floor(statSync(serverIconPath(id)).mtimeMs); } catch { return 0; }
 }
 function isEndstoneServer(id) {
-  try { return String(db.prepare("SELECT loader FROM servers WHERE id = ?").get(id)?.loader || "").toLowerCase() === "endstone"; } catch { return false; }
+  try { return String(queryOne("SELECT loader FROM servers WHERE id = ?", id)?.loader || "").toLowerCase() === "endstone"; } catch { return false; }
 }
 function serverPropPath(id) {
   return isEndstoneServer(id)
@@ -595,6 +597,9 @@ function setProp(id, key, value) {
 
 const LOG_FLUSH_MS = 250;
 const LOG_MAX_BYTES = 10 * 1024 * 1024;
+// SSE events are coalesced per animation frame: a burst of log lines becomes
+// one `data:` event instead of one per line.
+const LOG_EVENT_FLUSH_MS = 32;
 
 function getLogState(id) {
   const arr = globalThis.__smp_logs || (globalThis.__smp_logs = new Map());
@@ -644,17 +649,64 @@ function clearLogs(id) {
   if (old?.flushTimer) clearTimeout(old.flushTimer);
   arr.set(id, { lines: [], next: 0, loaded: true, pending: [], flushTimer: null });
   try { writeFileSync(serverLogPath(id), ""); } catch {}
+  const pending = logPending.get(id);
+  if (pending?.timer) clearTimeout(pending.timer);
+  logPending.delete(id);
   pushLogEvent(id, { clear: true, next: 0 });
 }
+/**
+ * SSE fan-out.
+ *
+ * A chatty server writes dozens of lines per frame. Enqueuing one event per
+ * line means dozens of separate `data:` writes, each with its own TextEncoder
+ * encode and stream chunk. Lines are coalesced into one event per tick, and the
+ * encoder is reused (it is stateless).
+ */
+const logEncoders = new Map();
+const logPending = new Map(); // id -> { lines: string[], next: number|null, clear?: boolean }
+
+function logEncoder() {
+  let enc = logEncoders.get("sse");
+  if (!enc) { enc = new TextEncoder(); logEncoders.set("sse", enc); }
+  return enc;
+}
+
 function pushLogEvent(id, payload) {
   const set = logStreams.get(id);
   if (!set || !set.size) return;
   const msg = `data: ${JSON.stringify(payload)}\n\n`;
   let bytes;
+  const enc = logEncoder();
   for (const c of [...set]) {
-    try { c.enqueue(bytes || (bytes = new TextEncoder().encode(msg))); } catch { set.delete(c); }
+    try { c.enqueue(bytes || (bytes = enc.encode(msg))); } catch { set.delete(c); }
   }
 }
+
+function flushLogEvents(id) {
+  const pending = logPending.get(id);
+  if (!pending) return;
+  logPending.delete(id);
+  if (pending.clear) { pushLogEvent(id, { clear: true, next: pending.next ?? 0 }); return; }
+  if (!pending.lines.length) return;
+  pushLogEvent(id, { lines: pending.lines, next: pending.next });
+}
+
+function queueLogLines(id, lines, next) {
+  if (!lines.length) return;
+  let pending = logPending.get(id);
+  if (!pending) { pending = { lines: [], next }; logPending.set(id, pending); }
+  pending.lines.push(...lines);
+  if (Number.isFinite(next)) pending.next = next;
+  if (!pending.timer) {
+    pending.timer = setTimeout(() => {
+      const current = logPending.get(id);
+      if (current) current.timer = null;
+      flushLogEvents(id);
+    }, LOG_EVENT_FLUSH_MS);
+    pending.timer.unref?.();
+  }
+}
+
 function logLine(id, text) {
   const st = getLogState(id);
   const raw = String(text ?? "").replace(/\r?\n$/, "");
@@ -665,7 +717,10 @@ function logLine(id, text) {
   st.pending.push(entry.t);
   if (st.pending.length >= 500) flushLogs(id);
   else if (!st.flushTimer) st.flushTimer = setTimeout(() => { st.flushTimer = null; flushLogs(id); }, LOG_FLUSH_MS);
-  pushLogEvent(id, { line: entry.t, n: entry.n });
+  // Coalesced: the client applies an array of lines per event instead of one
+  // event per line, so a burst costs one JSON encode and one stream write.
+  const set = logStreams.get(id);
+  if (set && set.size) queueLogLines(id, [entry.t], entry.n + 1);
 }
 process.on("exit", flushAllLogs);
 function getLogs(id, after, limit) {
@@ -693,7 +748,7 @@ function setServerPid(id, pid) {
 }
 function getServerRow(id) {
   if (!isValidServerId(id)) return null;
-  return db.prepare("SELECT * FROM servers WHERE id = ?").get(id);
+  return queryOne("SELECT * FROM servers WHERE id = ?", id);
 }
 function isRunning(id) {
   const r = runningServers.get(id);
@@ -1072,8 +1127,11 @@ async function createServerRecord(body = {}) {
 
 // ============ SERVERS ============
 export const serversRoute = new Elysia({ prefix: "/api/servers" })
-  .get("/", async ({ query }) => {
+  .get("/", async ({ request, query }) => {
+    // One snapshot for the whole list: per-server lookups would run two
+    // queries each (loader ports + plugin ports) plus one reservation scan.
     const rows = db.prepare("SELECT * FROM servers ORDER BY name ASC").all();
+    const sharedPorts = usedPorts();
     const modsByServer = new Map();
     for (const m of db.prepare("SELECT * FROM mods").all()) {
       if (!modsByServer.has(m.server_id)) modsByServer.set(m.server_id, []);
@@ -1092,9 +1150,9 @@ export const serversRoute = new Elysia({ prefix: "/api/servers" })
       if (withUpdates && !online && !pack) {
         try { update = await getServerUpdateInfo(r); } catch { update = null; }
       }
-      out.push({ ...r, online: online ? 1 : 0, ports: serverPortsStatus(r), mods, java: !!lm.java, eula_required: !!lm.eula, loader_custom: !!lm.custom, has_icon: hasServerIcon(r.id), icon_version: serverIconVersion(r.id), update, modpack: pack ? modpackMeta(pack) : null });
+      out.push({ ...r, online: online ? 1 : 0, ports: serverPortsStatus(r, sharedPorts), mods, java: !!lm.java, eula_required: !!lm.eula, loader_custom: !!lm.custom, has_icon: hasServerIcon(r.id), icon_version: serverIconVersion(r.id), update, modpack: pack ? modpackMeta(pack) : null });
     }
-    return { servers: out };
+    return jsonResponse(request, { servers: out });
   })
   .post("/", async ({ body }) => {
     try {
@@ -1105,7 +1163,7 @@ export const serversRoute = new Elysia({ prefix: "/api/servers" })
       return new Response(JSON.stringify({ errors: e?.errors || [e?.message || "Invalid server"] }), { status, headers: { "Content-Type": "application/json" } });
     }
   })
-  .get("/:id", async ({ params, query }) => {
+  .get("/:id", async ({ request, params, query }) => {
     const row = getServerRow(params.id);
     if (!row) return new Response("Not found", { status: 404 });
     const mods = db.prepare("SELECT * FROM mods WHERE server_id = ?").all(row.id).map(modFromRow);
@@ -1126,7 +1184,7 @@ export const serversRoute = new Elysia({ prefix: "/api/servers" })
         try { update = await getServerUpdateInfo(row); } catch { update = null; }
       }
     }
-    return { server: { ...row, online: online ? 1 : 0, ports: serverPortsStatus(row), strict_ports: getSetting(`ports_strict_${row.id}`, "0") === "1", port_profile: portProfile(row.loader), mods, java: !!lm.java, eula_required: !!lm.eula, loader_custom: !!lm.custom, has_icon: hasServerIcon(row.id), icon_version: serverIconVersion(row.id), update, modpack } };
+    return jsonResponse(request, { server: { ...row, online: online ? 1 : 0, ports: serverPortsStatus(row), strict_ports: getSetting(`ports_strict_${row.id}`, "0") === "1", port_profile: portProfile(row.loader), mods, java: !!lm.java, eula_required: !!lm.eula, loader_custom: !!lm.custom, has_icon: hasServerIcon(row.id), icon_version: serverIconVersion(row.id), update, modpack } });
   })
   .post("/:id/ports", ({ params, body, set }) => {
     if (!isValidServerId(params.id) || !getServerRow(params.id)) return new Response(JSON.stringify({ ok: false, error: "Not found" }), { status: 404, headers: { "Content-Type": "application/json" } });
@@ -1195,11 +1253,11 @@ export const serversRoute = new Elysia({ prefix: "/api/servers" })
     try { db.prepare("DELETE FROM schedules WHERE server_id = ?").run(params.id); } catch {}
     try { deleteServerPorts(params.id); } catch {}
     try { db.prepare("DELETE FROM servers WHERE id = ?").run(params.id); } catch {}
-    try { db.prepare("DELETE FROM settings WHERE key LIKE ?").run(`sftp_%_${params.id}`); } catch {}
-    try { db.prepare("DELETE FROM settings WHERE key = ?").run(sftpEnabledKey(params.id)); } catch {}
-    try { db.prepare("DELETE FROM settings WHERE key = ?").run(sftpPasswordKey(params.id)); } catch {}
-    try { db.prepare("DELETE FROM settings WHERE key = ?").run(`backup_seq_${params.id}`); } catch {}
-    try { db.prepare("DELETE FROM settings WHERE key = ?").run(`ports_strict_${params.id}`); } catch {}
+    try { deleteSettingsLike(`sftp_%_${params.id}`); } catch {}
+    try { deleteSetting(sftpEnabledKey(params.id)); } catch {}
+    try { deleteSetting(sftpPasswordKey(params.id)); } catch {}
+    try { deleteSetting(`backup_seq_${params.id}`); } catch {}
+    try { deleteSetting(`ports_strict_${params.id}`); } catch {}
     try { const dir = serverPath(params.id); if (existsSync(dir)) rmdirRecursive(dir); } catch {}
     return { ok: true };
   })
@@ -1329,6 +1387,50 @@ export const serversRoute = new Elysia({ prefix: "/api/servers" })
   });
 
 // ============ CONTROL ============
+/**
+ * Usage for every running server in one round trip.
+ *
+ * `GET /api/servers/:id/stats` per server costs a request (and a process read)
+ * each; the resource panel on the server detail view and any future overview
+ * widget need the same numbers, so the client polls once here.
+ */
+export const statsRoute = new Elysia({ prefix: "/api/stats" })
+  .get("/", async ({ request }) => {
+    const rows = db.prepare("SELECT * FROM servers ORDER BY name ASC").all();
+    const now = Date.now();
+    const out = [];
+    for (const row of rows) {
+      const online = isRunning(row.id);
+      const memoryMaxBytes = parseMemoryMb(row.memory_max, 2048) * 1024 * 1024;
+      const pid = online ? (runningServers.get(row.id)?.proc?.pid || row.pid || null) : null;
+      if (!online || !pid) {
+        procUsageSamples.delete(row.pid);
+        out.push({ id: row.id, online: false, pid: null, cpuPercent: 0, memoryBytes: 0, memoryMaxBytes });
+        continue;
+      }
+      const sample = await readProcessUsage(pid);
+      if (!sample) {
+        out.push({ id: row.id, online: true, pid, cpuPercent: 0, memoryBytes: 0, memoryMaxBytes, error: "Process stats unavailable" });
+        continue;
+      }
+      const prev = procUsageSamples.get(pid);
+      let cpuPercent = 0;
+      if (prev && now > prev.t && sample.cpuSeconds >= prev.cpuSeconds) {
+        cpuPercent = ((sample.cpuSeconds - prev.cpuSeconds) / ((now - prev.t) / 1000)) * 100;
+      }
+      procUsageSamples.set(pid, { cpuSeconds: sample.cpuSeconds, t: now });
+      out.push({
+        id: row.id,
+        online: true,
+        pid,
+        cpuPercent: Math.max(0, Math.round(cpuPercent * 10) / 10),
+        memoryBytes: sample.memoryBytes,
+        memoryMaxBytes,
+      });
+    }
+    return jsonResponse(request, { stats: out, timestamp: now });
+  });
+
 export const controlRoute = new Elysia({ prefix: "/api/servers" })
   .post("/:id/eula", ({ params, body }) => {
     const row = getServerRow(params.id);
@@ -1413,9 +1515,9 @@ export const controlRoute = new Elysia({ prefix: "/api/servers" })
     const res = getLogs(params.id, Number.isFinite(after) ? after : null, Number.isFinite(limit) ? limit : null);
     return { ok: true, lines: res.lines, next: res.next, running: isRunning(params.id) };
   })
-  .get("/:id/stats", async ({ params }) => {
+.get("/:id/stats", async ({ request, params }) => {
     const row = getServerRow(params.id);
-    if (!row) return new Response(JSON.stringify({ ok: false, error: "Not found" }), { status: 404, headers: { "Content-Type": "application/json" } });
+    if (!row) return new Response(JSON.stringify({ ok: false, error: "Not found" }), { status: 404 });
     const memoryMaxBytes = parseMemoryMb(row.memory_max, 2048) * 1024 * 1024;
     const online = isRunning(params.id);
     const pid = online ? (runningServers.get(params.id)?.proc?.pid || row.pid || null) : null;
@@ -1457,9 +1559,9 @@ export const controlRoute = new Elysia({ prefix: "/api/servers" })
         if (!set) { set = new Set(); logStreams.set(id, set); }
         set.add(c);
         const init = getLogs(id, after != null && after !== "" ? Number(after) : null);
-        c.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ init: init.lines, next: init.next, running: isRunning(id) })}\n\n`));
+        c.enqueue(logEncoder().encode(`data: ${JSON.stringify({ init: init.lines, next: init.next, running: isRunning(id) })}\n\n`));
         const hb = setInterval(() => {
-          try { c.enqueue(new TextEncoder().encode(`: ping\n\n`)); } catch { try { clearInterval(hb); } catch {} }
+          try { c.enqueue(logEncoder().encode(`: ping\n\n`)); } catch { try { clearInterval(hb); } catch {} }
         }, 15000);
         c._hb = hb;
       },
@@ -1622,7 +1724,7 @@ function modpackMeta(pack) {
 
 function getModpackRow(serverId) {
   try {
-    return db.prepare("SELECT * FROM modpacks WHERE server_id = ? ORDER BY created_at DESC LIMIT 1").get(serverId) || null;
+    return queryOne("SELECT * FROM modpacks WHERE server_id = ? ORDER BY created_at DESC LIMIT 1", serverId) || null;
   } catch {
     return null;
   }
@@ -1678,6 +1780,8 @@ const __updateCache = globalThis.__smp_updateCache || (globalThis.__smp_updateCa
 async function getServerUpdateInfo(row, { force = false } = {}) {
   if (!row?.loader || !row?.loader_version) return null;
   const key = `${row.loader}`;
+  // The loader already caches its version list for a few minutes; the dashboard
+  // and the detail view ask for the same thing, so the result is kept too.
   const cached = __updateCache.get(key);
   const now = Date.now();
   let items = cached?.items;
@@ -1733,6 +1837,7 @@ export const jarRoute = new Elysia({ prefix: "/api/jar" })
         if (result.exec !== undefined) db.prepare("UPDATE servers SET exec = ? WHERE id = ?").run(result.exec ? JSON.stringify(result.exec) : null, serverId);
         try { __updateCache.delete(loaderId); } catch {}
         for (const k of __buildCache.keys()) if (k.startsWith(`${loaderId}:`)) __buildCache.delete(k);
+        invalidateLoaderCache(loaderId);
       }
       return { ...result, file: fileName, version: resolvedVersion, loader_build: resolvedLoaderBuild, loaderVersion: resolvedLoaderBuild || null };
     } catch (e) {
@@ -1740,35 +1845,35 @@ export const jarRoute = new Elysia({ prefix: "/api/jar" })
       return new Response(`Download error: ${e.message}`, { status: 500 });
     }
   })
-  .get("/versions", async ({ query }) => {
+  .get("/versions", async ({ request, query }) => {
     const { loader, channel = "all", version } = query;
     if (version) {
       // `/jar/versions?version=<mc>` is an alias for the loader-build endpoint.
-      return await fetchLoaderVersionsFor({ loader, version, channel });
+      return jsonResponse(request, await fetchLoaderVersionsFor({ loader, version, channel }));
     }
     const impl = getLoader(loader);
-    if (!impl) return { versions: [], error: "Loader not supported" };
+    if (!impl) return jsonResponse(request, { versions: [], error: "Loader not supported" });
     try {
       const all = normalizeVersionList(await impl.getVersions());
       const items = filterVersionsByChannel(all, channel);
       const latestStable = all.find((v) => v.channel === "stable")?.id || null;
       const latestExperimental = all.find((v) => v.channel === "experimental")?.id || null;
       // Backward-compatible `versions: string[]` plus rich `items`/channels.
-      return { versions: items.map((v) => v.id), items, loader: impl.meta(), channel, latest: { stable: latestStable, experimental: latestExperimental } };
-    } catch (e) { return { versions: [], items: [], error: e.message }; }
+      return jsonResponse(request, { versions: items.map((v) => v.id), items, loader: impl.meta(), channel, latest: { stable: latestStable, experimental: latestExperimental } });
+    } catch (e) { return jsonResponse(request, { versions: [], items: [], error: e.message }); }
   })
-  .get("/loader-versions", async ({ query }) => {
+  .get("/loader-versions", async ({ request, query }) => {
     const { loader, version, mc, channel = "all" } = query;
-    return await fetchLoaderVersionsFor({ loader, version: version || mc, channel });
+    return jsonResponse(request, await fetchLoaderVersionsFor({ loader, version: version || mc, channel }));
   })
-  .get("/latest", async ({ query }) => {
+  .get("/latest", async ({ request, query }) => {
     const { loader, channel = "stable" } = query;
     const impl = getLoader(loader);
-    if (!impl) return new Response(JSON.stringify({ error: "Loader not supported" }), { status: 501, headers: { "Content-Type": "application/json" } });
+    if (!impl) return jsonResponse(request, { error: "Loader not supported" }, { status: 501 });
     try {
       const v = await impl.resolveVersion(`latest-${String(channel).includes("exp") ? "experimental" : "stable"}`, channel);
-      return { ok: true, loader, ...v };
-    } catch (e) { return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: { "Content-Type": "application/json" } }); }
+      return jsonResponse(request, { ok: true, loader, ...v });
+    } catch (e) { return jsonResponse(request, { error: e.message }, { status: 500 }); }
   });
 
 // ============ MODS (server) ============
@@ -2416,11 +2521,13 @@ export const backupsRoute = new Elysia({ prefix: "/api/servers/:id/backups" })
 
 // ============ SETTINGS ============
 export const settingsRoute = new Elysia({ prefix: "/api/settings" })
-  .get("/", () => {
+  .get("/", ({ request }) => {
+    // Reads go through the pooled connection so they never queue behind a
+    // concurrent write on the main handle.
     const rows = db.prepare("SELECT key, value FROM settings").all();
     const s = {};
     for (const r of rows) s[r.key] = r.value;
-    return { settings: s };
+    return jsonResponse(request, { settings: s });
   })
   .post("/", ({ body, set }) => {
     const { key, value } = body || {};
@@ -2434,11 +2541,32 @@ export const loadersRoute = new Elysia({ prefix: "/api/loaders" })
   .get("/", () => ({ loaders: listLoaders().map((l) => ({ ...l, ports: portProfile(l.id) })) }));
 
 // ============ JAVA ============
+/**
+ * `detectJava()` spawns `java -version` once per candidate (PATH, JAVA_HOME and
+ * every system install), which is 3-6 processes and a few hundred ms. That is
+ * too slow to run on every settings paint, so the result is cached briefly and
+ * refreshed eagerly after an install/uninstall.
+ */
+const JAVA_SCAN_TTL_MS = Number(process.env.SMP_JAVA_SCAN_MS) || 30 * 1000;
+let javaScanCache = null;
+
+function invalidateJavaScan() {
+  javaScanCache = null;
+}
+
+async function detectJavaCached() {
+  const now = Date.now();
+  if (javaScanCache && now - javaScanCache.at < JAVA_SCAN_TTL_MS) return javaScanCache.value;
+  const detected = await detectJava(JAVA_DIR).catch(() => []);
+  javaScanCache = { at: now, value: detected };
+  return detected;
+}
+
 export const javaRoute = new Elysia({ prefix: "/api/java" })
   .get("/installed", () => ({ installed: listInstalledJava(JAVA_DIR), javaDir: JAVA_DIR }))
   .get("/", async () => {
     const [detected, installed] = await Promise.all([
-      detectJava(JAVA_DIR).catch(() => []),
+      detectJavaCached(),
       Promise.resolve(listInstalledJava(JAVA_DIR)),
     ]);
     const installedIds = new Set(installed.map(i => String(i.id)));
@@ -2453,7 +2581,7 @@ export const javaRoute = new Elysia({ prefix: "/api/java" })
     return { available, installed, detected, runtimes: rt, defaultVersion: defaultJavaId(JAVA_DIR, detected), javaDir: JAVA_DIR };
   })
   .get("/runtimes", async () => {
-    const [detected, installed] = await Promise.all([detectJava(JAVA_DIR).catch(() => []), Promise.resolve(listInstalledJava(JAVA_DIR))]);
+    const [detected, installed] = await Promise.all([detectJavaCached(), Promise.resolve(listInstalledJava(JAVA_DIR))]);
     const runtimes = [
       { id: "system", name: "System Java (PATH/JAVA_HOME)", source: "system" },
       ...installed.map(i => ({ id: i.id, name: "Java " + i.id + " (installed in java folder)", source: "managed", path: i.path })),
@@ -2463,7 +2591,7 @@ export const javaRoute = new Elysia({ prefix: "/api/java" })
     return { runtimes: runtimes.filter(r => { const k = String(r.id); if (seen.has(k)) return false; seen.add(k); return true; }) };
   })
   .get("/detect", async () => {
-    const java = await detectJava(JAVA_DIR).catch(() => []);
+    const java = await detectJavaCached();
     return { java, detected: java };
   })
   .post("/install", async ({ body, set }) => {
@@ -2471,7 +2599,9 @@ export const javaRoute = new Elysia({ prefix: "/api/java" })
     if (!/^\d+$/.test(version)) { set.status = 400; return { ok: false, error: "Specify a valid major version (e.g. 21)" }; }
     try {
       const res = await installJava(JAVA_DIR, version);
+      invalidateJavaScan();
       const [detected, installed] = await Promise.all([detectJava(JAVA_DIR).catch(() => []), Promise.resolve(listInstalledJava(JAVA_DIR))]);
+      javaScanCache = { at: Date.now(), value: detected };
       return { ...res, installed, detected };
     } catch (e) {
       set.status = 500;
@@ -2481,6 +2611,7 @@ export const javaRoute = new Elysia({ prefix: "/api/java" })
   .delete("/:version", async ({ params, set }) => {
     const res = uninstallJava(JAVA_DIR, params.version);
     if (!res.ok) { set.status = 404; return res; }
+    invalidateJavaScan();
     return { ...res, installed: listInstalledJava(JAVA_DIR) };
   });
 export const systemRoute = new Elysia({ prefix: "/api/system" })
@@ -3406,6 +3537,9 @@ const app = new Elysia()
     },
     credentials: true,
   }))
+  // Compress JSON API responses. The panel polls every 1-5 s, and its payloads
+  // are repetitive JSON that gzips by ~80%.
+  .onAfterHandle(async ({ request, response }) => compressResponse(request, response))
   .onRequest(async ({ request }) => {
     const url = new URL(request.url);
     const m = url.pathname.match(/^\/api\/servers\/([^/]+)\/(files|upload)(\/.*)?$/);
@@ -3421,6 +3555,7 @@ const app = new Elysia()
     }
   })
   .use(serversRoute)
+  .use(statsRoute)
   .use(portsRoute)
   .use(controlRoute)
   .use(jarRoute)
@@ -3458,17 +3593,13 @@ const app = new Elysia()
       if (pathname.startsWith("/assets/")) return new Response("Not found", { status: 404 });
       const indexFile = join(OUTPUT_DIR, "index.html");
       if (!existsSync(indexFile)) return new Response("Panel build missing. Run the web build.", { status: 500 });
-      return new Response(Bun.file(indexFile), {
-        headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" },
-      });
+      return fileResponse(request, indexFile, "text/html; charset=utf-8", "no-cache");
     }
     const ext = filePath.split(".").pop().toLowerCase();
     const cache = pathname.startsWith("/assets/")
       ? IMMUTABLE_CACHE
       : (rel === "index.html" ? "no-cache" : ASSET_CACHE);
-    return new Response(Bun.file(filePath), {
-      headers: { "Content-Type": MIME[ext] || "application/octet-stream", "Cache-Control": cache },
-    });
+    return fileResponse(request, filePath, MIME[ext] || "application/octet-stream", cache);
   })
   .listen(Number(process.env.SMP_PORT || process.env.PORT || 3001));
 
