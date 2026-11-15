@@ -110,12 +110,12 @@
     z-index: var(--z-sidebar);
     display: flex;
     flex-direction: column;
-    gap: 20px;
+    gap: 18px;
     width: var(--sidebar-w);
-    padding: 16px 14px;
+    padding: 14px 12px;
     overflow-y: auto;
     background:
-      linear-gradient(180deg, color-mix(in srgb, var(--sidebar) 88%, var(--accent) 3%) 0%, var(--sidebar) 42%),
+      linear-gradient(180deg, color-mix(in srgb, var(--sidebar) 94%, var(--accent) 2%) 0%, var(--sidebar) 42%),
       var(--sidebar);
     border-right: 1px solid var(--border);
   }
@@ -160,9 +160,9 @@
     align-items: center;
     gap: 10px;
     width: 100%;
-    padding: 8px 10px;
+    padding: 7px 9px;
     color: var(--text-secondary);
-    font-size: 0.83rem;
+    font-size: 0.82rem;
     font-weight: 500;
     text-align: left;
     background: transparent;
@@ -170,7 +170,7 @@
     border-radius: var(--radius);
     transition: color var(--t-fast), background var(--t-fast), border-color var(--t-fast);
   }
-  .nav-item:hover { color: var(--text); background: var(--panel); }
+  .nav-item:hover { color: var(--text); background: var(--panel-elevated); }
   .nav-item.active {
     color: var(--text);
     background: var(--accent-soft);
@@ -255,7 +255,7 @@
     border-radius: var(--radius);
     transition: color var(--t-fast), background var(--t-fast), border-color var(--t-fast);
   }
-  .server-item:hover { color: var(--text); background: var(--panel); }
+  .server-item:hover { color: var(--text); background: var(--panel-elevated); }
   .server-item.active { color: var(--text); background: var(--panel-elevated); border-color: var(--border-secondary); }
   .server-avatar {
     position: relative;

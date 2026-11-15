@@ -11,7 +11,7 @@
     label = "Loading…",
     width = "100%",
     height = 14,
-    radius = 6,
+    radius = 4,
     class: className = "",
   } = $props();
 </script>

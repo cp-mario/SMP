@@ -424,6 +424,28 @@
     }
   }
 
+  /**
+   * Every open of "New server" starts from scratch: selections made in the dialog are
+   * dropped unless the server was actually created.
+   */
+  function resetCreateForm() {
+    Object.assign(appState, {
+      createName: "",
+      selectedLoader: null,
+      selectedVersion: null,
+      selectedLoaderBuild: null,
+      selectedVersionChannel: "stable",
+      loaderBuildChannel: "all",
+      loaderBuilds: [],
+      loaderBuildsSupported: false,
+      loaderBuildsLoading: false,
+      loaderBuildsError: null,
+      versionChannel: "all",
+      versionsSearch: "",
+      versionsError: null,
+    });
+  }
+
   async function handleCreate({ memoryMax, jvmArgs, ports }) {
     appState.createLoading = true;
     const name = appState.createName.trim();
@@ -442,21 +464,7 @@
       const id = typeof res === "string" ? res : res?.id;
       await refreshServers({ updates: true });
       showCreate = false;
-      Object.assign(appState, {
-        createName: "",
-        selectedLoader: null,
-        selectedVersion: null,
-        selectedLoaderBuild: null,
-        selectedVersionChannel: "stable",
-        loaderBuildChannel: "all",
-        loaderBuilds: [],
-        loaderBuildsSupported: false,
-        loaderBuildsLoading: false,
-        loaderBuildsError: null,
-        versionChannel: "all",
-        versionsSearch: "",
-        versionsError: null,
-      });
+      resetCreateForm();
       if (res?.installError) toasts.warning(`Server "${name}" created, but install failed: ${res.installError}`);
       else toasts.success(`Server "${name}" created`);
       if (id) router.navigate(`/server/${id}`);
@@ -557,7 +565,7 @@
     onPickLatestLoaderBuild={handlePickLatestLoaderBuild}
     onCreateName={(v) => { appState.createName = v; }}
     onCreate={handleCreate}
-    onClose={() => { showCreate = false; }}
+    onClose={() => { showCreate = false; resetCreateForm(); }}
     selectedLoaderBuild={appState.selectedLoaderBuild}
     loaderBuilds={appState.loaderBuilds}
     loaderBuildsLoading={appState.loaderBuildsLoading}
@@ -565,7 +573,7 @@
     loaderBuildsError={appState.loaderBuildsError}
     loaderBuildChannel={appState.loaderBuildChannel}
     onSelectLoaderBuild={(v) => { appState.selectedLoaderBuild = v; }}
-    onOpenModpack={() => { showCreate = false; showModpack = true; }}
+    onOpenModpack={() => { showCreate = false; resetCreateForm(); showModpack = true; }}
   />
 
   <ModpackCreate

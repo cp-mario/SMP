@@ -58,8 +58,8 @@
   // Modal-to-modal switches must crossfade: the outgoing overlay fades out while
   // the incoming one fades in, so the page backdrop never flashes through.
   const reduceMotion = typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-  const backdropMs = reduceMotion ? 0 : 180;
-  const panelMs = reduceMotion ? 0 : 220;
+  const backdropMs = reduceMotion ? 0 : 140;
+  const panelMs = reduceMotion ? 0 : 190;
   let panelEl = $state(null);
   let lastFocus = null;
 
@@ -117,7 +117,7 @@
     onkeydown={onKeydown}
     transition:fade={{ duration: backdropMs }}
   >
-    <div class="modal" role="dialog" aria-modal="true" aria-label={title || "Dialog"} tabindex="-1" bind:this={panelEl} transition:fly={{ y: 14, duration: panelMs }}>
+    <div class="modal" role="dialog" aria-modal="true" aria-label={title || "Dialog"} tabindex="-1" bind:this={panelEl} transition:fly={{ y: 8, duration: panelMs }}>
       {#if title || dismissible}
         <div class="modal-header">
           <div class="modal-heading">
@@ -146,16 +146,13 @@
   .modal { max-width: var(--modal-w); }
   .modal-heading { min-width: 0; }
   .modal-subtitle { color: var(--text-secondary); font-size: 0.8rem; margin-top: 3px; }
-  .modal:focus { outline: none; }
-  .modal-footer {
+  .modal:focus { outline: none; }  .modal-footer {
     padding: 14px 20px 18px;
     margin-top: 0;
     border-top: 1px solid var(--border);
     justify-content: flex-end;
-    background: color-mix(in srgb, var(--panel-elevated) 55%, transparent);
-    position: sticky;
-    bottom: 0;
-    z-index: 2;
+    background: var(--panel);
+    flex: 0 0 auto;
   }
 
   /* Near full-screen dialog used by the mod store: the body scrolls, the header and footer stay put. */

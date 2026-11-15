@@ -3,6 +3,8 @@
    ========================================================================== */
 
 .app {
+  position: relative;
+  z-index: 1;
   display: flex;
   min-height: 100vh;
 }
@@ -11,12 +13,12 @@
   flex: 1;
   min-width: 0;
   margin-left: var(--sidebar-w);
-  padding: 34px 40px 104px;
+  padding: 32px clamp(20px, 3.2vw, 44px) 88px;
 }
 
 .view {
   width: 100%;
-  max-width: 1500px;
+  max-width: 1480px;
   margin: 0 auto;
 }
 
@@ -24,22 +26,21 @@
 
 .page-header {
   display: flex;
-  align-items: flex-start;
+  align-items: flex-end;
   justify-content: space-between;
-  gap: 18px;
+  gap: 16px;
   flex-wrap: wrap;
-  margin-bottom: 24px;
-  padding-bottom: 18px;
+  margin-bottom: 20px;
+  padding-bottom: 16px;
   border-bottom: 1px solid var(--border);
 }
 
 .page-header h1 {
   margin: 0;
-  font-size: clamp(1.45rem, 2vw, 1.8rem);
-  font-weight: 700;
+  font-size: clamp(1.35rem, 1.6vw, 1.6rem);
+  font-weight: 650;
   line-height: 1.15;
-  letter-spacing: -0.035em;
-  text-wrap: balance;
+  letter-spacing: -0.03em;
 }
 
 .page-header .subtitle {
@@ -47,9 +48,10 @@
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-  margin-top: 6px;
-  color: var(--text-secondary);
-  font-size: 0.84rem;
+  margin-top: 5px;
+  color: var(--text-disabled);
+  font-size: 0.8rem;
+  letter-spacing: 0;
 }
 
 .header-actions {
@@ -62,7 +64,7 @@
 /* ---------- Generic layout helpers ---------- */
 
 .section {
-  margin-bottom: 28px;
+  margin-bottom: 24px;
 }
 
 .row {
@@ -75,7 +77,7 @@
 .stack {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
 }
 
 .divider {
@@ -86,31 +88,39 @@
 
 /* ---------- Responsive ---------- */
 
-@media (max-width: 1100px) {
+@media (max-width: 1280px) {
   .main-content {
-    padding: 28px 26px 100px;
+    padding: 28px clamp(18px, 2.4vw, 30px) 84px;
   }
 }
 
 @media (max-width: 900px) {
   .main-content {
     margin-left: 0;
-    padding: 22px 18px 100px;
+    padding: 22px 18px 96px;
   }
 
-  .page-header h1 {
-    font-size: 1.4rem;
+  .page-header {
+    align-items: flex-start;
   }
 }
 
 @media (max-width: 560px) {
   .main-content {
-    padding: 18px 14px 96px;
+    padding: 18px 14px 92px;
   }
 
   .page-header {
     gap: 12px;
-    margin-bottom: 18px;
+    margin-bottom: 16px;
     padding-bottom: 14px;
+  }
+
+  .page-header h1 {
+    font-size: 1.3rem;
+  }
+
+  .header-actions {
+    width: 100%;
   }
 }

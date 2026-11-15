@@ -2,30 +2,30 @@
    Shared components
    These classes are used across several screens. Component-specific styling
    lives in the component's own <style> block.
+
+   Interaction rules: hover states change colour and borders only (no layout or
+   transform work) so scrolling a long list stays smooth; transforms are
+   reserved for press feedback.
    ========================================================================== */
 
 /* ---------- Cards ---------- */
 
 .card {
+  position: relative;
   display: flex;
   flex-direction: column;
-  background: linear-gradient(180deg, var(--panel-elevated) 0%, var(--panel) 100%);
+  background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03), var(--shadow);
-  transition: border-color var(--t), transform var(--t), box-shadow var(--t);
+  box-shadow: var(--shadow-xs);
+  transition: border-color var(--t), background-color var(--t), box-shadow var(--t);
 }
 
-.card:hover {
-  border-color: var(--border-strong);
-  transform: translateY(-2px);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), var(--shadow-lg);
-}
-
-@media (hover: none) {
+@media (hover: hover) {
   .card:hover {
-    transform: none;
-    box-shadow: var(--shadow);
+    background: color-mix(in srgb, var(--panel) 94%, #fff 6%);
+    border-color: var(--border-secondary);
+    box-shadow: var(--shadow-sm);
   }
 }
 
@@ -34,28 +34,28 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 10px;
-  padding: 16px 18px 0;
+  padding: 14px 16px 0;
 }
 
 .card-info {
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 6px;
   min-width: 0;
 }
 
 .card-name {
   overflow: hidden;
-  font-size: 0.98rem;
-  font-weight: 700;
-  letter-spacing: -0.01em;
+  font-size: 0.94rem;
+  font-weight: 650;
+  letter-spacing: -0.012em;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .card-meta {
   display: flex;
-  gap: 6px;
+  gap: 5px;
   flex-wrap: wrap;
 }
 
@@ -63,13 +63,13 @@
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 14px;
-  padding: 15px 18px 17px;
+  gap: 12px;
+  padding: 13px 16px 15px;
 }
 
 .card-actions {
   display: flex;
-  gap: 8px;
+  gap: 7px;
   flex-wrap: wrap;
 }
 
@@ -78,23 +78,22 @@
 .stat {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
   min-width: 74px;
 }
 
 .stat-val {
   font-family: var(--font-mono);
-  font-size: 0.9rem;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
+  font-size: 0.88rem;
+  font-weight: 600;
   letter-spacing: -0.02em;
 }
 
 .stat-label {
   color: var(--text-disabled);
-  font-size: 0.65rem;
+  font-size: 0.62rem;
   font-weight: 600;
-  letter-spacing: 0.09em;
+  letter-spacing: var(--tracking-label);
   text-transform: uppercase;
 }
 
@@ -103,7 +102,7 @@
 }
 
 .empty {
-  padding: 48px 20px;
+  padding: 40px 20px;
   color: var(--muted);
   text-align: center;
 }
@@ -114,16 +113,16 @@
 select,
 textarea {
   width: 100%;
-  padding: 8px 11px;
+  padding: 7px 10px;
   color: var(--text);
   font-family: var(--font);
-  font-size: 0.86rem;
+  font-size: 0.85rem;
   background: var(--input-bg);
   border: 1px solid var(--border);
   border-radius: var(--radius-input);
   outline: none;
-  box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.28);
-  transition: border-color var(--t-fast), box-shadow var(--t-fast), background var(--t-fast);
+  box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.24);
+  transition: border-color var(--t-fast), box-shadow var(--t-fast), background-color var(--t-fast);
 }
 
 .input:hover,
@@ -135,9 +134,9 @@ textarea:hover {
 .input:focus,
 select:focus,
 textarea:focus {
-  background: color-mix(in srgb, var(--input-bg) 88%, var(--accent) 12%);
-  border-color: var(--accent);
-  box-shadow: var(--ring), inset 0 1px 2px rgb(0 0 0 / 0.24);
+  background: color-mix(in srgb, var(--input-bg) 90%, var(--accent) 10%);
+  border-color: color-mix(in srgb, var(--accent) 65%, var(--border-secondary));
+  box-shadow: var(--ring), inset 0 1px 2px rgb(0 0 0 / 0.2);
 }
 
 .input::placeholder,
@@ -154,18 +153,18 @@ textarea:disabled {
 
 select {
   appearance: none;
-  padding-right: 32px;
+  padding-right: 30px;
   background-image: linear-gradient(45deg, transparent 50%, var(--text-secondary) 50%),
     linear-gradient(135deg, var(--text-secondary) 50%, transparent 50%);
-  background-position: calc(100% - 15px) calc(50% + 1px), calc(100% - 10px) calc(50% + 1px);
+  background-position: calc(100% - 14px) calc(50% + 1px), calc(100% - 9px) calc(50% + 1px);
   background-repeat: no-repeat;
-  background-size: 5px 5px, 5px 5px;
+  background-size: 4px 4px, 4px 4px;
   cursor: pointer;
 }
 
 textarea {
   min-height: 64px;
-  line-height: 1.5;
+  line-height: 1.55;
   resize: vertical;
 }
 
@@ -173,9 +172,9 @@ textarea {
   display: block;
   margin-bottom: 6px;
   color: var(--text-secondary);
-  font-size: 0.69rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
+  font-size: 0.67rem;
+  font-weight: 600;
+  letter-spacing: var(--tracking-label);
   text-transform: uppercase;
 }
 
@@ -186,34 +185,36 @@ textarea {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  padding: 8px 14px;
+  padding: 7px 13px;
   color: var(--text);
   font-family: var(--font);
-  font-size: 0.82rem;
-  font-weight: 600;
+  font-size: 0.81rem;
+  font-weight: 550;
+  letter-spacing: -0.004em;
   white-space: nowrap;
   text-decoration: none;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--panel-elevated) 92%, #fff 8%), var(--panel-elevated));
+  user-select: none;
+  background: var(--panel-elevated);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--panel-elevated) 94%, #fff 6%), var(--panel-elevated));
   border: 1px solid var(--border);
   border-radius: var(--radius-btn);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), var(--shadow-xs);
+  box-shadow: var(--edge);
   cursor: pointer;
-  transition: background var(--t-fast), border-color var(--t-fast), color var(--t-fast),
+  transition: background-color var(--t-fast), border-color var(--t-fast), color var(--t-fast),
     box-shadow var(--t-fast), transform var(--t-fast);
 }
 
 .btn:hover:not(:disabled) {
   background: var(--panel-hover);
-  border-color: var(--border-strong);
-  transform: translateY(-1px);
+  border-color: var(--border-secondary);
 }
 
 .btn:active:not(:disabled) {
-  transform: translateY(0) scale(0.985);
+  transform: scale(0.985);
 }
 
 .btn:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid color-mix(in srgb, var(--accent) 78%, transparent);
   outline-offset: 2px;
 }
 
@@ -234,15 +235,14 @@ textarea {
 
 .btn-primary {
   color: #fff;
-  background: linear-gradient(180deg, var(--accent-hover) 0%, var(--accent) 100%);
-  border-color: color-mix(in srgb, var(--accent) 72%, #fff);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 8px 20px -12px var(--accent-ring);
+  background: linear-gradient(180deg, var(--accent-hover) 0%, var(--accent) 92%);
+  border-color: color-mix(in srgb, var(--accent) 74%, #fff);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), var(--shadow-glow);
 }
 
 .btn-primary:hover:not(:disabled) {
   background: linear-gradient(180deg, var(--accent-hover) 0%, var(--accent-hover) 100%);
   border-color: var(--accent-hover);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 12px 26px -12px var(--accent-ring);
 }
 
 .btn-outline {
@@ -259,7 +259,7 @@ textarea {
 }
 
 .btn-danger {
-  color: #ffb3b3;
+  color: #f2a19a;
   background: var(--danger-soft);
   border-color: var(--danger-border);
   box-shadow: none;
@@ -297,13 +297,13 @@ textarea {
 }
 
 .btn-xs {
-  padding: 4px 9px;
-  font-size: 0.7rem;
+  padding: 3px 8px;
+  font-size: 0.69rem;
   border-radius: var(--radius-xs);
 }
 
 .btn-sm {
-  padding: 6px 11px;
+  padding: 5px 10px;
   font-size: 0.76rem;
   border-radius: var(--radius-sm);
 }
@@ -315,10 +315,10 @@ textarea {
   flex-direction: column;
   min-width: 0;
   overflow: hidden;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--panel) 94%, #fff 6%) 0%, var(--panel) 100%);
+  background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03), var(--shadow);
+  box-shadow: var(--shadow-xs);
 }
 
 .panel-header {
@@ -327,13 +327,13 @@ textarea {
   justify-content: space-between;
   gap: 10px;
   flex-wrap: wrap;
-  padding: 13px 16px;
-  background: color-mix(in srgb, var(--panel-elevated) 55%, transparent);
+  padding: 11px 14px;
+  background: color-mix(in srgb, var(--panel-elevated) 42%, transparent);
   border-bottom: 1px solid var(--border);
 }
 
 .panel-body {
-  padding: 16px;
+  padding: 14px;
 }
 
 .panel-body-flush {
@@ -341,30 +341,29 @@ textarea {
 }
 
 #installed-mods {
-  height: 80vh;
+  height: min(80vh, 820px);
 }
 
 /* ---------- Console ---------- */
 
 .console-panel {
-  height: 80vh;
+  height: min(80vh, 820px);
 }
 
 .console {
   flex: 1;
-  min-height: 260px;
-  padding: 16px;
+  min-height: 240px;
+  padding: 14px;
   overflow-y: auto;
   overscroll-behavior: contain;
-  color: #d4d4d8;
+  color: #cfcfd6;
   font-family: var(--font-mono);
-  font-size: 0.78rem;
-  line-height: 1.5;
+  font-size: 0.76rem;
+  line-height: 1.55;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.012), transparent 18%),
-    #07070a;
+  background: #08080a;
+  tab-size: 2;
 }
 
 .console-line {
@@ -380,15 +379,15 @@ textarea {
 /* ---------- Key/value ---------- */
 
 .kv {
-  padding: 14px 16px;
+  padding: 12px 14px;
 }
 
 .kv-row {
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  padding: 8px 0;
-  font-size: 0.83rem;
+  padding: 7px 0;
+  font-size: 0.82rem;
   border-bottom: 1px solid var(--border);
 }
 
@@ -413,16 +412,16 @@ textarea {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 3px 7px;
+  padding: 2px 6px;
   color: var(--text-secondary);
-  font-size: 0.63rem;
-  font-weight: 700;
-  letter-spacing: 0.05em;
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.045em;
   white-space: nowrap;
   text-transform: uppercase;
-  background: rgba(255, 255, 255, 0.025);
+  background: rgba(255, 255, 255, 0.028);
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius-xs);
 }
 
 .badge-success,
@@ -433,7 +432,7 @@ textarea {
 }
 
 .badge-danger {
-  color: #ff9b9b;
+  color: #f0958d;
   background: var(--danger-soft);
   border-color: var(--danger-border);
 }
@@ -451,8 +450,8 @@ textarea {
 }
 
 .badge-accent {
-  color: var(--accent);
-  background: var(--accent-light);
+  color: color-mix(in srgb, var(--accent) 82%, #fff);
+  background: var(--accent-soft);
   border-color: var(--accent-ring);
 }
 
@@ -461,8 +460,8 @@ textarea {
 }
 
 .badge.loader {
-  color: var(--accent);
-  background: var(--accent-light);
+  color: color-mix(in srgb, var(--accent) 82%, #fff);
+  background: var(--accent-soft);
   border-color: var(--accent-ring);
 }
 
@@ -471,8 +470,8 @@ textarea {
 .form-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 10px;
-  margin-top: 18px;
+  gap: 8px;
+  margin-top: 16px;
 }
 
 /* ---------- Modal ---------- */
@@ -485,43 +484,46 @@ textarea {
   align-items: center;
   justify-content: center;
   padding: 20px;
-  background: rgba(5, 5, 8, 0.74);
-  backdrop-filter: blur(10px) saturate(120%);
+  background: rgba(6, 6, 8, 0.72);
+  backdrop-filter: blur(8px);
 }
 
 .modal {
   width: 100%;
   max-width: 600px;
-  max-height: 90vh;
-  overflow-y: auto;
+  max-height: min(88vh, calc(100dvh - 40px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   overscroll-behavior: contain;
-  background: linear-gradient(180deg, var(--panel-elevated) 0%, var(--panel) 100%);
+  background: var(--panel);
   border: 1px solid var(--border-secondary);
   border-radius: var(--radius-modal);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 32px 80px -28px rgb(0 0 0 / 0.9);
+  box-shadow: var(--edge), var(--shadow-lg);
 }
 
 .modal-header {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 16px 20px;
+  padding: 14px 18px;
   border-bottom: 1px solid var(--border);
 }
 
 .modal-title {
-  font-size: 1.02rem;
-  font-weight: 700;
-  letter-spacing: -0.02em;
+  font-size: 0.98rem;
+  font-weight: 650;
+  letter-spacing: -0.018em;
 }
 
 .modal-close {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   padding: 0;
   color: var(--text-secondary);
   font-size: 1.1rem;
@@ -529,7 +531,7 @@ textarea {
   background: transparent;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  transition: color var(--t-fast), border-color var(--t-fast), background var(--t-fast);
+  transition: color var(--t-fast), border-color var(--t-fast), background-color var(--t-fast);
 }
 
 .modal-close:hover {
@@ -539,14 +541,34 @@ textarea {
 }
 
 .modal-body {
-  padding: 20px;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 18px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+@media (max-width: 560px) {
+  .modal-overlay {
+    padding: 10px;
+  }
+
+  .modal {
+    max-height: calc(100dvh - 20px);
+  }
+
+  .modal-header,
+  .modal-body {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
 }
 
 /* ---------- Version pills (legacy) ---------- */
 
 .version-list {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   flex-wrap: wrap;
   margin-top: 8px;
 }
@@ -555,7 +577,7 @@ textarea {
   flex-direction: column;
   flex-wrap: nowrap;
   max-height: 260px;
-  padding: 8px;
+  padding: 6px;
   overflow-y: auto;
   background: var(--input-bg);
   border: 1px solid var(--border);
@@ -563,26 +585,26 @@ textarea {
 }
 
 .version-pill {
-  padding: 5px 11px;
+  padding: 4px 10px;
   color: var(--text-secondary);
   font-family: var(--font);
-  font-size: 0.78rem;
+  font-size: 0.77rem;
   background: var(--input-bg);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: border-color var(--t-fast), color var(--t-fast), background var(--t-fast);
+  transition: border-color var(--t-fast), color var(--t-fast), background-color var(--t-fast);
 }
 
 .version-pill:hover {
   color: var(--text);
-  border-color: var(--accent);
+  border-color: var(--border-secondary);
 }
 
 .version-pill.selected {
-  color: var(--accent);
-  background: var(--accent-light);
-  border-color: var(--accent);
+  color: color-mix(in srgb, var(--accent) 82%, #fff);
+  background: var(--accent-soft);
+  border-color: var(--accent-ring);
 }
 
 .version-pill.muted {
@@ -597,8 +619,9 @@ textarea {
   position: sticky;
   top: 0;
   z-index: 40;
-  padding: 12px 0;
-  background: var(--bg);
+  padding: 10px 0;
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  backdrop-filter: blur(8px);
 }
 
 .search-wrap {
@@ -607,38 +630,40 @@ textarea {
 
 .filters {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   flex-wrap: wrap;
-  margin-top: 10px;
+  margin-top: 8px;
 }
 
 .filter-pill {
-  padding: 5px 11px;
+  padding: 4px 10px;
   color: var(--text-secondary);
-  font-size: 0.74rem;
+  font-size: 0.73rem;
   text-transform: uppercase;
-  background: var(--panel);
+  letter-spacing: 0.03em;
+  background: transparent;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: border-color var(--t-fast), color var(--t-fast);
+  transition: border-color var(--t-fast), color var(--t-fast), background-color var(--t-fast);
 }
 
 .filter-pill:hover {
   color: var(--text);
-  border-color: var(--accent);
+  border-color: var(--border-secondary);
 }
 
 .filter-pill.active {
-  color: var(--accent);
-  border-color: var(--accent);
+  color: color-mix(in srgb, var(--accent) 82%, #fff);
+  background: var(--accent-soft);
+  border-color: var(--accent-ring);
 }
 
 /* ---------- Status dot ---------- */
 
 .status-dot {
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
   flex: 0 0 auto;
   background: var(--success);
   border-radius: 50%;
@@ -665,7 +690,7 @@ textarea {
   justify-content: space-between;
   gap: 10px;
   flex-wrap: wrap;
-  padding: 9px 11px;
+  padding: 8px 10px;
   background: var(--panel-elevated);
   border-bottom: 1px solid var(--border);
 }
@@ -681,8 +706,8 @@ textarea {
 .ce-select {
   width: auto;
   min-width: 116px;
-  padding: 5px 9px;
-  font-size: 0.76rem;
+  padding: 4px 9px;
+  font-size: 0.75rem;
 }
 
 .ce-wrap {
@@ -690,7 +715,7 @@ textarea {
   flex: 1;
   min-height: 340px;
   overflow: hidden;
-  background: #0b0d11;
+  background: #0a0c10;
 }
 
 .ce-gutter {
@@ -698,7 +723,7 @@ textarea {
   margin: 0;
   padding: 10px 10px 10px 12px;
   overflow: hidden;
-  color: #5b6472;
+  color: #565f6c;
   font-family: var(--font-mono);
   font-size: 13px;
   line-height: 1.55;
@@ -749,7 +774,7 @@ textarea {
   font-size: 0.82rem;
   line-height: 1.55;
   resize: vertical;
-  background: #0b0d11;
+  background: #0a0c10;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   outline: none;

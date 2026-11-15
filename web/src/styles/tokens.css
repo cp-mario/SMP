@@ -3,84 +3,93 @@
    Single source of truth for colour, type, spacing, radius and elevation.
    `--accent` can be overridden at runtime (documentElement inline style), so
    every derived accent token uses color-mix() and updates automatically.
+
+   Palette notes: surfaces are a neutral graphite (no blue/violet cast) so the
+   accent is the only saturated thing on screen. Hairline borders carry the
+   structure instead of drop shadows.
    ========================================================================== */
 
 :root {
   color-scheme: dark;
 
   /* Canvas & surfaces */
-  --bg: #0a0a0d;
-  --bg-soft: #0d0d11;
-  --sidebar: #0b0b0f;
-  --panel: #111116;
-  --panel-elevated: #16161c;
-  --panel-hover: #1b1b22;
-  --input-bg: #0c0c11;
+  --bg: #0a0a0b;
+  --bg-soft: #0c0c0e;
+  --sidebar: #0a0a0b;
+  --panel: #111113;
+  --panel-elevated: #17171a;
+  --panel-hover: #1e1e22;
+  --input-bg: #0c0c0e;
 
   /* Borders */
-  --border: #222229;
-  --border-secondary: #2e2e37;
-  --border-strong: #3c3c47;
+  --border: #222226;
+  --border-secondary: #2f2f35;
+  --border-strong: #43434b;
+  --hairline: rgba(255, 255, 255, 0.04);
 
   /* Text */
-  --text: #f4f4f7;
-  --text-secondary: #a2a2ad;
-  --text-disabled: #666671;
-  --muted: #8b8b96;
+  --text: #f1f1f3;
+  --text-secondary: #9c9ca4;
+  --text-disabled: #686870;
+  --muted: #8a8a92;
 
   /* Accent (runtime-overridable) */
   --accent: #9255e8;
-  --accent-hover: color-mix(in srgb, var(--accent) 84%, #fff);
-  --accent-dark: color-mix(in srgb, var(--accent) 76%, #000);
-  --accent-light: color-mix(in srgb, var(--accent) 14%, transparent);
-  --accent-soft: color-mix(in srgb, var(--accent) 7%, transparent);
-  --accent-ring: color-mix(in srgb, var(--accent) 30%, transparent);
+  --accent-hover: color-mix(in srgb, var(--accent) 86%, #fff);
+  --accent-dark: color-mix(in srgb, var(--accent) 78%, #000);
+  --accent-light: color-mix(in srgb, var(--accent) 13%, transparent);
+  --accent-soft: color-mix(in srgb, var(--accent) 6%, transparent);
+  --accent-ring: color-mix(in srgb, var(--accent) 26%, transparent);
 
-  /* Semantic tones */
-  --success: #3ddc84;
-  --success-soft: rgba(61, 220, 132, 0.11);
-  --success-border: rgba(61, 220, 132, 0.32);
-  --danger: #f05252;
-  --danger-soft: rgba(240, 82, 82, 0.11);
-  --danger-border: rgba(240, 82, 82, 0.34);
-  --warning: #f0b429;
-  --warning-soft: rgba(240, 180, 41, 0.11);
-  --warning-border: rgba(240, 180, 41, 0.34);
-  --info: #5aa2f7;
-  --info-soft: rgba(90, 162, 247, 0.11);
-  --info-border: rgba(90, 162, 247, 0.32);
+  /* Semantic tones — slightly desaturated so they sit next to the accent */
+  --success: #48c98d;
+  --success-soft: rgba(72, 201, 141, 0.1);
+  --success-border: rgba(72, 201, 141, 0.3);
+  --danger: #e85c53;
+  --danger-soft: rgba(232, 92, 83, 0.1);
+  --danger-border: rgba(232, 92, 83, 0.32);
+  --warning: #e0a83f;
+  --warning-soft: rgba(224, 168, 63, 0.1);
+  --warning-border: rgba(224, 168, 63, 0.32);
+  --info: #5aa0ef;
+  --info-soft: rgba(90, 160, 239, 0.1);
+  --info-border: rgba(90, 160, 239, 0.3);
 
   /* Typography */
-  --font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font: "Inter", "Inter var", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --tracking-tight: -0.022em;
+  --tracking-label: 0.08em;
 
-  /* Radii — deliberately restrained: crisp, not pill-shaped */
-  --radius-xs: 4px;
-  --radius-sm: 6px;
-  --radius: 8px;
-  --radius-lg: 10px;
-  --radius-xl: 12px;
-  --radius-modal: 12px;
-  --radius-input: 7px;
-  --radius-btn: 7px;
+  /* Radii — small on purpose: crisp edges read as engineered, not templated */
+  --radius-xs: 3px;
+  --radius-sm: 4px;
+  --radius: 5px;
+  --radius-lg: 6px;
+  --radius-xl: 8px;
+  --radius-modal: 8px;
+  --radius-input: 4px;
+  --radius-btn: 4px;
   --radius-pill: 999px;
 
-  /* Elevation */
-  --shadow-xs: 0 1px 2px rgb(0 0 0 / 0.3);
-  --shadow-sm: 0 2px 6px -2px rgb(0 0 0 / 0.45);
-  --shadow: 0 12px 32px -24px rgb(0 0 0 / 0.9);
-  --shadow-lg: 0 24px 60px -24px rgb(0 0 0 / 0.85);
-  --shadow-glow: 0 10px 30px -12px var(--accent-ring);
-  --ring: 0 0 0 3px var(--accent-light);
+  /* Elevation — tight, low-contrast shadows; borders do most of the work */
+  --shadow-xs: 0 1px 1px rgb(0 0 0 / 0.24);
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.32), 0 3px 8px -4px rgb(0 0 0 / 0.4);
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.36), 0 10px 26px -18px rgb(0 0 0 / 0.7);
+  --shadow-lg: 0 2px 6px rgb(0 0 0 / 0.4), 0 28px 56px -28px rgb(0 0 0 / 0.8);
+  --shadow-glow: 0 6px 18px -12px var(--accent-ring);
+  --ring: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+  --edge: inset 0 1px 0 rgba(255, 255, 255, 0.035);
 
-  /* Motion */
-  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
-  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-  --t-fast: 120ms var(--ease);
-  --t: 180ms var(--ease);
+  /* Motion — fast enough to feel instant, never bouncy */
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --t-fast: 110ms var(--ease);
+  --t: 160ms var(--ease);
+  --t-slow: 260ms var(--ease-out);
 
   /* Shell */
-  --sidebar-w: 272px;
+  --sidebar-w: 264px;
   --z-sidebar: 50;
   --z-mobile-nav: 60;
   --z-modal: 100;

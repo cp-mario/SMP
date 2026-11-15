@@ -86,6 +86,13 @@
     uploadName = "";
     formError = "";
     busy = false;
+    // Also clear what the user picked while browsing, so reopening starts clean.
+    name = "";
+    nameTouched = false;
+    customLoader = "";
+    customLoaderVersion = "";
+    memoryMb = 4096;
+    jvmArgs = "";
   }
 
   function changeSource(value) {
@@ -375,7 +382,7 @@
     object-fit: cover;
     background: var(--panel);
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: 5px;
   }
   .pack-icon.placeholder { display: flex; align-items: center; justify-content: center; color: var(--text-secondary); font-weight: 700; text-transform: uppercase; }
   .pack-main { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; }

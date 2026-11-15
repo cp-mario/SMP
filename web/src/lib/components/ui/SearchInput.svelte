@@ -7,7 +7,7 @@
   let {
     value = $bindable(""),
     placeholder = "Search…",
-    label = "Search",
+    label = "",
     hint = "",
     disabled = false,
     class: className = "",

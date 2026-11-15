@@ -990,9 +990,9 @@
   }
   .card:hover { transform: translateY(-2px); border-color: var(--border-strong); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), var(--shadow-lg); }
   .card-head { display: flex; gap: 12px; align-items: center; min-width: 0; }
-  .icon { width: 50px; height: 50px; border-radius: 10px; object-fit: cover; flex: 0 0 auto; background: var(--input-bg); border: 1px solid var(--border); }
+  .icon { width: 50px; height: 50px; border-radius: 5px; object-fit: cover; flex: 0 0 auto; background: var(--input-bg); border: 1px solid var(--border); }
   .icon.placeholder { display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 1.05rem; color: var(--text-secondary); text-transform: uppercase; }
-  .icon.lg { width: 64px; height: 64px; border-radius: 14px; font-size: 1.3rem; }
+  .icon.lg { width: 64px; height: 64px; border-radius: 6px; font-size: 1.3rem; }
   .card-title { min-width: 0; flex: 1; }
   .name { font-weight: 700; font-size: 0.95rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .author { font-size: 0.74rem; margin-top: 2px; }

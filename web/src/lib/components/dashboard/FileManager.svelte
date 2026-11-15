@@ -52,6 +52,14 @@
   let dragOver = $state(false);
   let dragDepth = 0;
   let search = $state("");
+  let searchResults = $state([]);
+  let searchBusy = $state(false);
+  let searchTruncated = $state(false);
+  let searchSeq = 0;
+  let editFilePath = $state("");
+  let viewFilePath = $state("");
+  // Search runs server-side across the whole subtree under the current folder.
+  const searching = $derived(search.trim().length >= 2);
   let sortKey = $state("name");
   let sftp = $state(null);
   let showSftp = $state(false);
@@ -92,6 +100,11 @@
 
   function closeCtx() { ctx = { ...ctx, show: false }; }
   function relPath(name) { return currentPath ? `${currentPath}/${name}` : name; }
+  // Search results already carry their full path from the server root; plain rows
+  // only carry a name relative to the open folder.
+  const itemRel = (item) => item?.path ?? relPath(item?.name ?? "");
+  const sortName = (x) => x.path || x.name || "";
+  const dirOf = (p = "") => { const i = String(p).lastIndexOf("/"); return i > 0 ? String(p).slice(0, i) : "server-files"; };
   function encodePath(p) { return p.split("/").filter(Boolean).map(encodeURIComponent).join("/"); }
   function fileUrl(rel, suffix = "") { const base = `/servers/${serverId}/files`; return rel ? `${base}/${encodePath(rel)}${suffix}` : `${base}${suffix}`; }
   function apiDownloadUrl(rel, isDir = false) { return `/api${fileUrl(rel, isDir ? "/download" : "/content")}?download=1`; }
@@ -118,6 +131,37 @@
   onDestroy(() => {
     destroyed = true;
     if (noticeTimer) { clearTimeout(noticeTimer); noticeTimer = null; }
+  });
+
+  // Debounced so typing does not walk the server tree on every keystroke. Requests
+  // are sequenced: a late answer for an older term never overwrites a newer one.
+  $effect(() => {
+    const q = search.trim();
+    const seq = ++searchSeq;
+    if (q.length < 2) {
+      searchResults = [];
+      searchTruncated = false;
+      searchBusy = false;
+      return;
+    }
+    searchBusy = true;
+    const root = currentPath;
+    const timer = setTimeout(async () => {
+      try {
+        const res = await api(`${fileUrl(root)}?q=${encodeURIComponent(q)}&limit=300`);
+        if (destroyed || seq !== searchSeq) return;
+        searchResults = res?.files || [];
+        searchTruncated = !!res?.truncated;
+      } catch (e) {
+        if (destroyed || seq !== searchSeq) return;
+        searchResults = [];
+        searchTruncated = false;
+        setNotice(`Search error: ${e?.message || e}`, "error", 5000);
+      } finally {
+        if (!destroyed && seq === searchSeq) searchBusy = false;
+      }
+    }, 220);
+    return () => clearTimeout(timer);
   });
 
   async function loadDir({ quiet = false } = {}) {
@@ -148,11 +192,11 @@
   }
 
   const sortedFiles = $derived.by(() => {
-    let list = files.filter((f) => !search || f.name.toLowerCase().includes(search.toLowerCase()));
+    let list = searching ? searchResults : files;
     const dir = (x) => (x.isDirectory ? 0 : 1);
-    if (sortKey === "size") list = [...list].sort((a, b) => dir(a) - dir(b) || (a.size || 0) - (b.size || 0) || a.name.localeCompare(b.name));
-    else if (sortKey === "date") list = [...list].sort((a, b) => dir(a) - dir(b) || (b.mtime || 0) - (a.mtime || 0) || a.name.localeCompare(b.name));
-    else list = [...list].sort((a, b) => dir(a) - dir(b) || a.name.localeCompare(b.name));
+    if (sortKey === "size") list = [...list].sort((a, b) => dir(a) - dir(b) || (a.size || 0) - (b.size || 0) || sortName(a).localeCompare(sortName(b)));
+    else if (sortKey === "date") list = [...list].sort((a, b) => dir(a) - dir(b) || (b.mtime || 0) - (a.mtime || 0) || sortName(a).localeCompare(sortName(b)));
+    else list = [...list].sort((a, b) => dir(a) - dir(b) || sortName(a).localeCompare(sortName(b)));
     return list;
   });
 
@@ -160,6 +204,8 @@
     files = [];
     filesLoadedOnce = false;
     search = "";
+    searchResults = [];
+    searchTruncated = false;
   }
 
   async function enterDir(name) { currentPath = currentPath ? `${currentPath}/${name}` : name; resetForPath(); await loadDir(); }
@@ -173,7 +219,7 @@
     if (!item) return;
     deleteBusy = true;
     try {
-      await api(fileUrl(relPath(item.name)), { method: "DELETE" });
+      await api(fileUrl(itemRel(item)), { method: "DELETE" });
       setNotice(`"${item.name}" deleted`, "success");
       deleteTarget = null;
       showDeleteModal = false;
@@ -208,6 +254,7 @@
       await loadDir();
       await loadEditor();
       editFileName = name;
+      editFilePath = relPath(name);
       editContent = "";
       editOriginal = "";
       showEditModal = true;
@@ -215,9 +262,9 @@
   }
 
   async function openItem(item) {
-    if (item.isDirectory) return enterDir(item.name);
+    if (item.isDirectory) return goTo(item.path ?? relPath(item.name));
     try {
-      const rel = relPath(item.name);
+      const rel = itemRel(item);
       if (isTextFile(item.name)) {
         if ((item.size || 0) > MAX_TEXT_EDIT) {
           setNotice("File is too large to open in the editor (max 10 MB).", "error", 5000);
@@ -226,11 +273,13 @@
         const content = await Promise.all([loadEditor(), api(fileUrl(rel, "/content"))]).then(([, data]) => data);
         const text = typeof content === "string" ? content : JSON.stringify(content, null, 2);
         editFileName = item.name;
+        editFilePath = rel;
         editContent = typeof text === "string" ? text : JSON.stringify(text, null, 2);
         editOriginal = editContent;
         showEditModal = true;
       } else if (isImageFile(item.name)) {
         viewFileName = item.name;
+        viewFilePath = rel;
         viewFileUrl = `/api${fileUrl(rel, "/content")}`;
         showEditModal = false;
         showViewModal = true;
@@ -246,7 +295,7 @@
     if (!editDirty) return;
     const body = editContent;
     try {
-      await api(fileUrl(relPath(editFileName), "/content"), { method: "POST", body, headers: { "Content-Type": "text/plain; charset=utf-8" } });
+      await api(fileUrl(editFilePath, "/content"), { method: "POST", body, headers: { "Content-Type": "text/plain; charset=utf-8" } });
       editOriginal = body;
       showEditModal = false;
       setNotice("File saved", "success");
@@ -257,7 +306,7 @@
   function downloadItem(item) {
     if (!item) return;
     const a = document.createElement("a");
-    a.href = apiDownloadUrl(relPath(item.name), item.isDirectory);
+    a.href = apiDownloadUrl(itemRel(item), item.isDirectory);
     a.download = item.isDirectory ? `${item.name}.zip` : item.name;
     document.body.appendChild(a);
     a.click();
@@ -274,7 +323,7 @@
   async function doRename() {
     if (!renameTarget || !renameValue.trim() || renameValue.trim() === renameTarget.name) { showRenameModal = false; return; }
     try {
-      await api(fileUrl(relPath(renameTarget.name), "/rename"), { method: "POST", body: JSON.stringify({ name: renameValue.trim() }) });
+      await api(fileUrl(itemRel(renameTarget), "/rename"), { method: "POST", body: JSON.stringify({ name: renameValue.trim() }) });
       showRenameModal = false;
       setNotice("Renamed", "success");
       await loadDir();
@@ -285,7 +334,7 @@
     closeCtx();
     setNotice(`Compressing "${item.name}"…`, "info", 0);
     try {
-      await api(fileUrl(relPath(item.name), "/compress"), { method: "POST", body: JSON.stringify({}) });
+      await api(fileUrl(itemRel(item), "/compress"), { method: "POST", body: JSON.stringify({}) });
       setNotice("Zip archive created", "success");
       await loadDir();
     } catch (e) { setNotice(`Error: ${e?.message || e}`, "error", 5000); }
@@ -296,7 +345,7 @@
     if (!isArchive(item.name)) return setNotice("Only .zip archives can be extracted", "error");
     setNotice(`Extracting "${item.name}"…`, "info", 0);
     try {
-      await api(fileUrl(relPath(item.name), "/extract"), { method: "POST", body: JSON.stringify({}) });
+      await api(fileUrl(itemRel(item), "/extract"), { method: "POST", body: JSON.stringify({}) });
       setNotice("Extracted successfully", "success");
       await loadDir();
     } catch (e) { setNotice(`Error: ${e?.message || e}`, "error", 5000); }
@@ -433,7 +482,13 @@
       {uploadBusy ? `Uploading ${uploadPercent}%` : "Upload files"}
       <input type="file" multiple onchange={onFileInput} disabled={uploadBusy} />
     </label>
-    <span class="muted fm-count">{files.length} item(s){dragOver ? " · drop to upload" : ""}</span>
+    <span class="muted fm-count">
+      {#if searching}
+        {searchResults.length} result(s){searchTruncated ? " · refine the term" : " · including subfolders"}
+      {:else}
+        {files.length} item(s){dragOver ? " · drop to upload" : ""}
+      {/if}
+    </span>
   </div>
 
   {#if showNewFolder}
@@ -452,35 +507,42 @@
   {/if}
 
   <div class="fm-list" role="region" oncontextmenu={(e) => openContext(e, null)}>
-    {#if loading && files.length === 0}
-      <div class="fm-state"><Spinner label="Loading files…" /></div>
-    {:else if error && files.length === 0}
+    {#if (loading && files.length === 0) || (searching && searchBusy && sortedFiles.length === 0)}
+      <div class="fm-state"><Spinner label={searching ? "Searching…" : "Loading files…"} /></div>
+    {:else if error && files.length === 0 && !searching}
       <Alert tone="danger" title="Could not list">{error} <Button size="xs" variant="outline" onclick={loadDir}>Retry</Button></Alert>
     {:else if sortedFiles.length === 0}
-      <EmptyState icon="folder" title={search ? "No results" : "Empty folder"} description={search ? "Try another search." : "Upload files or create a folder."} />
+      <EmptyState icon={searching ? "search" : "folder"} title={searching ? "No matches" : "Empty folder"} description={searching ? `Nothing named "${search.trim()}" in this folder or below it.` : "Upload files or create a folder."} />
     {:else}
       <div class="fm-head">
         <span>Name</span><span>Size</span><span>Modified</span><span></span>
       </div>
-      {#each sortedFiles as item (item.name)}
+      {#each sortedFiles as item (item.path || item.name)}
         <div
           class="fm-row"
           role="button"
           tabindex="0"
-          onclick={() => item.isDirectory && enterDir(item.name)}
+          onclick={() => item.isDirectory && goTo(item.path ?? relPath(item.name))}
           ondblclick={() => openItem(item)}
-          onkeydown={(e) => { if (e.target !== e.currentTarget) return; if (e.key === "Enter") { item.isDirectory ? enterDir(item.name) : openItem(item); } }}
+          onkeydown={(e) => { if (e.target !== e.currentTarget) return; if (e.key === "Enter") { item.isDirectory ? goTo(item.path ?? relPath(item.name)) : openItem(item); } }}
           oncontextmenu={(e) => openContext(e, item)}
         >
           <div class="fm-name">
             <span class="fm-icon" class:folder={item.isDirectory}><Icon name={iconFor(item)} size={16} /></span>
-            <span class="fm-name-text" title={item.name}>{item.name}</span>
+            {#if searching}
+              <span class="fm-name-col">
+                <span class="fm-name-text" title={item.path}>{item.name}</span>
+                <span class="fm-name-path">{dirOf(item.path)}</span>
+              </span>
+            {:else}
+              <span class="fm-name-text" title={item.name}>{item.name}</span>
+            {/if}
           </div>
           <span class="fm-meta">{item.isDirectory ? "—" : formatSize(item.size)}</span>
           <span class="fm-meta">{formatDate(item.mtime)}</span>
           <div class="fm-actions">
             {#if item.isDirectory}
-              <IconButton label="Open folder" icon="folder-open" variant="outline" onclick={(e) => { e.stopPropagation(); enterDir(item.name); }} />
+              <IconButton label="Open folder" icon="folder-open" variant="outline" onclick={(e) => { e.stopPropagation(); goTo(itemRel(item)); }} />
             {:else if isTextFile(item.name)}
               <IconButton label="Edit file" icon="edit" variant="outline" onclick={(e) => { e.stopPropagation(); openItem(item); }} />
             {:else if isImageFile(item.name)}
@@ -541,7 +603,7 @@
     {/if}
   </div>
   {#snippet footer()}
-    <Button size="sm" variant="outline" href={apiDownloadUrl(relPath(editFileName))}><Icon name="download" size={13} /> Download</Button>
+    <Button size="sm" variant="outline" href={apiDownloadUrl(editFilePath)}><Icon name="download" size={13} /> Download</Button>
     <Button size="sm" variant="primary" disabled={!editDirty} idle={!editDirty} onclick={saveEdit}><Icon name="save" size={13} /> Save</Button>
   {/snippet}
 </Modal>
@@ -552,7 +614,7 @@
   </div>
   {#snippet footer()}
     <Button size="sm" variant="outline" onclick={() => (showViewModal = false)}>Close</Button>
-    <Button size="sm" variant="primary" href={apiDownloadUrl(relPath(viewFileName))}><Icon name="download" size={13} /> Download</Button>
+    <Button size="sm" variant="primary" href={apiDownloadUrl(viewFilePath)}><Icon name="download" size={13} /> Download</Button>
   {/snippet}
 </Modal>
 
@@ -613,7 +675,9 @@
   .fm-ctx-sep { height: 1px; background: var(--border); margin: 4px 2px; }
   .fm-editor-wrap { display: flex; flex-direction: column; height: min(70vh, 760px); min-height: 420px; }
   .fm-preview { display: flex; align-items: center; justify-content: center; padding: 8px; background: var(--input-bg); border-radius: var(--radius); }
-  .fm-preview img { max-width: 100%; max-height: 60vh; border-radius: 8px; image-rendering: pixelated; }
+  .fm-preview img { max-width: 100%; max-height: 60vh; border-radius: 5px; image-rendering: pixelated; }
+  .fm-name-col { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .fm-name-path { overflow: hidden; color: var(--text-disabled); font-size: 0.69rem; text-overflow: ellipsis; white-space: nowrap; }
   @media (max-width: 980px) {
     .fm-head { display: none; }
     .fm-row { grid-template-columns: minmax(0, 1fr) auto; grid-auto-rows: auto; padding: 10px 12px; gap: 6px; }

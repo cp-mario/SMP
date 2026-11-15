@@ -881,14 +881,6 @@
             <div class="muted">No ports assigned yet.</div>
           {/if}
         </Panel>
-        <Panel title="Quick actions" icon="zap">
-          <div class="quick-grid">
-            <Button size="sm" variant="outline" onclick={() => (activeTab = "backups")}><Icon name="archive" size={14} /> Backups</Button>
-            <Button size="sm" variant="outline" onclick={() => (activeTab = "files")}><Icon name="folder" size={14} /> Files</Button>
-            <Button size="sm" variant="outline" onclick={() => (activeTab = "mods")}><Icon name="puzzle" size={14} /> Mods</Button>
-            <Button size="sm" variant="outline" onclick={openLoaderModal}><Icon name="layers" size={14} /> Loader</Button>
-          </div>
-        </Panel>
       </div>
     </div>
 
@@ -1341,11 +1333,11 @@
     color: var(--accent);
     background: radial-gradient(circle at 30% 20%, var(--accent-soft), color-mix(in srgb, var(--panel-elevated) 92%, var(--accent) 8%));
     border: 1px solid var(--accent-ring);
-    border-radius: 13px;
+    border-radius: 5px;
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), var(--shadow-xs);
   }
   .server-avatar.offline { color: var(--text-disabled); background: var(--panel-elevated); border-color: var(--border); }
-  .server-avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: 12px; image-rendering: pixelated; }
+  .server-avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: 4px; image-rendering: pixelated; }
   .avatar-status {
     position: absolute;
     right: -3px;
@@ -1395,13 +1387,13 @@
   .row-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
   .foot-note { margin-top: 8px; font-size: 0.74rem; }
   .port-list { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
-  .port-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-elevated); font-size: 0.78rem; }
+  .port-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 4px; background: var(--panel-elevated); font-size: 0.78rem; }
   .port-row.conflict { border-color: var(--danger); }
   .port-role { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .port-proto { color: var(--text-secondary); font-size: 0.68rem; letter-spacing: 0.04em; }
   .port-input { width: 88px; font-family: var(--font-mono); text-align: right; padding: 4px 6px; }
   .connect-list { display: flex; flex-direction: column; gap: 6px; }
-  .connect-row { display: flex; align-items: center; gap: 8px; padding: 7px 8px; font-size: 0.78rem; background: var(--panel-elevated); border: 1px solid var(--border); border-radius: 8px; }
+  .connect-row { display: flex; align-items: center; gap: 8px; padding: 7px 8px; font-size: 0.78rem; background: var(--panel-elevated); border: 1px solid var(--border); border-radius: 4px; }
   .connect-label { flex: 0 0 auto; color: var(--text-secondary); }
   .connect-addr { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-mono); color: var(--text); }
   .connect-proto { flex: 0 0 auto; color: var(--text-secondary); font-size: 0.68rem; letter-spacing: 0.04em; }
@@ -1465,8 +1457,6 @@
   .sftp-box :global(.input) { font-family: var(--font-mono); font-size: 0.78rem; }
 
   /* ---------- Quick actions ---------- */
-  .quick-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-  .quick-grid :global(.btn) { justify-content: flex-start; }
 
   /* ---------- Updates ---------- */
   .update-list { display: flex; flex-direction: column; gap: 10px; }
@@ -1502,7 +1492,7 @@
     object-fit: cover;
     background: var(--input-bg);
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: 5px;
   }
   .mod-icon.placeholder {
     display: flex;
@@ -1519,7 +1509,7 @@
     gap: 12px;
     padding: 11px 8px;
     border-bottom: 1px solid var(--border);
-    border-radius: 7px;
+    border-radius: 5px;
     transition: background var(--t-fast);
   }
   .mod-row:hover { background: color-mix(in srgb, var(--panel-elevated) 55%, transparent); }
@@ -1551,7 +1541,6 @@
   @media (max-width: 640px) {
     .server-header { align-items: flex-start; padding: 16px; }
     .controls-row { width: 100%; }
-    .quick-grid { grid-template-columns: minmax(0, 1fr); }
     .mod-row { flex-wrap: wrap; }
     .mod-actions { width: 100%; justify-content: flex-start; }
     .mod-name, .mod-extra { max-width: 100%; }

@@ -527,7 +527,7 @@
       <div class="storage-list">
         <div class="storage-row"><span>Format on disk</span><b>.tar.zst</b></div>
         <div class="storage-row"><span>Total size</span><b>{formatSize(totalSize)}</b></div>
-        <div class="storage-row"><span>Protected (not counted)</span><b>{protectedCount}</b></div>
+        <div class="storage-row"><span>Protected (not counted in the limit)</span><b>{protectedCount}</b></div>
         <div class="storage-row"><span>Unprotected</span><b>{unprotectedCount}</b></div>
         <div class="storage-row" class:over={overLimit > 0}><span>Over the limit</span><b>{overLimit}</b></div>
       </div>

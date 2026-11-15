@@ -19,22 +19,36 @@ html {
   scroll-behavior: smooth;
   scrollbar-gutter: stable;
   scrollbar-width: thin;
+  scrollbar-color: var(--border-secondary) transparent;
+  -webkit-tap-highlight-color: transparent;
 }
 
 body {
   min-height: 100vh;
+  overflow-x: clip;
   font-family: var(--font);
-  font-size: 15px;
-  line-height: 1.5;
+  font-size: 14.5px;
+  line-height: 1.55;
+  letter-spacing: -0.006em;
   color: var(--text);
-  background:
-    radial-gradient(1100px 560px at 16% -12%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 62%),
-    radial-gradient(900px 480px at 100% 0%, rgba(90, 162, 247, 0.035), transparent 58%),
-    var(--bg);
-  background-attachment: fixed;
+  background: var(--bg);
+  font-feature-settings: "kern" 1, "calt" 1;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+}
+
+/* Ambient wash. Painted once on a fixed layer: no repaint on scroll, unlike
+   `background-attachment: fixed` on <body>. */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(780px 420px at 14% -12%, color-mix(in srgb, var(--accent) 7%, transparent), transparent 62%),
+    radial-gradient(640px 360px at 100% 0%, rgba(120, 150, 190, 0.028), transparent 58%);
 }
 
 a {
@@ -79,6 +93,7 @@ h1,
 h2,
 h3 {
   text-wrap: balance;
+  letter-spacing: var(--tracking-tight);
 }
 
 p {
@@ -91,12 +106,12 @@ input[type="radio"] {
 }
 
 ::selection {
-  background: var(--accent-ring);
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
   color: var(--text);
 }
 
-:where(button, a, [role="button"], input, select, textarea):focus-visible {
-  outline: 2px solid var(--accent);
+:where(button, a, [role="button"], input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 78%, transparent);
   outline-offset: 2px;
 }
 
@@ -106,10 +121,10 @@ input[type="search"]::-webkit-search-decoration {
   appearance: none;
 }
 
-/* Thin, unobtrusive scrollbars that still read as premium. */
+/* Thin, unobtrusive scrollbars. */
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-track {
@@ -129,11 +144,30 @@ input[type="search"]::-webkit-search-decoration {
   border: 2px solid transparent;
 }
 
+/* Numbers in tables, counters and metrics should not jitter. */
+.tnum,
+.stat-val,
+.kv-v,
+.meta-value {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  body::after {
+    display: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
   *,
   *::before,
   *::after {
     animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
     scroll-behavior: auto !important;
   }

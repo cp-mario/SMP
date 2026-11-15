@@ -217,6 +217,18 @@
 
   function close() { onClose?.(); }
 
+  // Leaving the dialog (Cancel, Escape, backdrop, X or "From modpack") without
+  // creating drops the ephemeral choices, so the next open never shows stale values.
+  $effect(() => {
+    if (open) return;
+    memoryMb = 2048;
+    jvmArgs = "";
+    portValues = {};
+    portErrors = {};
+    portsChecked = false;
+    portsChecking = false;
+  });
+
   function onName(e) { onCreateName?.(e.currentTarget.value); }
 
   function changeVersionChannel(channel) {
@@ -392,6 +404,7 @@
                     data-version={id}
                     data-selected={selectedVersion === id ? "true" : "false"}
                     type="button"
+                    title={id}
                     onclick={() => onSelectVersion?.(id, ch)}
                   >{id}{#if ch !== "stable"}<span class="muted"> (experimental)</span>{/if}</button>
                 {:else}
@@ -524,12 +537,10 @@
       </aside>
     </div>
 
-    <div class="footer">
-      <div class="footer-left">
-        <Button size="sm" variant="outline" disabled={createLoading} onclick={() => onOpenModpack?.()}><Icon name="package" size={13} /> From modpack</Button>
-      </div>
-
-      <div class="footer-right">
+  {#snippet footer()}
+    <div class="create-footer">
+      <Button size="sm" variant="outline" disabled={createLoading} onclick={() => onOpenModpack?.()}><Icon name="package" size={13} /> From modpack</Button>
+      <div class="footer-actions">
         <Button size="sm" variant="outline" disabled={createLoading} onclick={close}>Cancel</Button>
         <Button
           size="sm"
@@ -540,6 +551,7 @@
         ><Icon name="plus" size={13} /> Create server</Button>
       </div>
     </div>
+  {/snippet}
 </Modal>
 
 <style>
@@ -567,20 +579,36 @@
   .section-sub { margin-top: 1px; color: var(--text-secondary); font-size: 0.73rem; line-height: 1.45; }
 
   .pill-list { display: flex; gap: 6px; flex-wrap: wrap; }
+  /* Long lists (hundreds of Minecraft versions, thousands of loader builds):
+     uniform rows so the grid never turns into a wall of squeezed, unevenly
+     wrapped pills. */
   .pill-list.scrollable {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
-    gap: 5px;
-    min-height: 96px;
-    max-height: 196px;
-    padding: 8px;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    align-content: start;
+    gap: 6px;
+    min-height: 120px;
+    max-height: clamp(200px, 32vh, 300px);
+    padding: 10px;
     overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
     background: var(--input-bg);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.2);
   }
-  .pill-list.scrollable .pill { overflow: hidden; text-align: center; text-overflow: ellipsis; }
+  .pill-list.scrollable .pill {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 30px;
+    padding: 6px 10px;
+    overflow: hidden;
+    text-align: center;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .pill {
     padding: 6px 11px;
     color: var(--text-secondary);
@@ -600,7 +628,7 @@
     box-shadow: inset 0 0 0 1px var(--accent-ring);
   }
   .pill.muted { color: var(--text-disabled); white-space: normal; cursor: default; }
-  .pill-list.scrollable .pill { font-family: var(--font-mono); font-size: 0.71rem; }
+  .pill-list.scrollable .pill { font-family: var(--font-mono); font-size: 0.74rem; letter-spacing: -0.004em; }
   .pill-list.scrollable .pill.muted { font-family: var(--font); font-size: 0.76rem; }
   .loader-note { display: flex; flex-direction: column; gap: 2px; font-size: 0.76rem; line-height: 1.45; }
   .row-actions { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -659,21 +687,16 @@
   .summary-row b { overflow-wrap: anywhere; font-weight: 600; text-align: right; }
   .summary-note { display: flex; align-items: flex-start; gap: 6px; color: var(--text-disabled); font-size: 0.7rem; line-height: 1.4; }
   .summary-note :global(.icon) { margin-top: 1px; }
-  .footer-left, .footer-right { display: flex; gap: 8px; }
+  /* Docked footer: Modal renders it outside the scrolling body. */
+  .create-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; width: 100%; }
+  .footer-actions { display: flex; gap: 8px; margin-left: auto; }
 
   @media (max-width: 780px) {
     .create-layout { grid-template-columns: minmax(0, 1fr); }
     .create-summary { position: static; }
   }
-  .footer {
-    display: flex;
-    border-top: 1px solid var(--border);
-    background: color-mix(in srgb, var(--panel-elevated) 55%, transparent);
-    z-index: 2;
-    justify-content: space-between;
-    margin-top: 20px;
-    padding-top: 14px;
-    position: sticky;
-    bottom: 0;
+
+  @media (max-width: 560px) {
+    .pill-list.scrollable { grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); }
   }
 </style>

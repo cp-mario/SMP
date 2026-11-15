@@ -54,15 +54,15 @@
 <style>
   .tabs {
     display: flex;
-    gap: 4px;
+    gap: 2px;
     width: fit-content;
     max-width: 100%;
-    margin-bottom: 20px;
-    padding: 4px;
+    margin-bottom: 18px;
+    padding: 3px;
     overflow-x: auto;
     background: color-mix(in srgb, var(--panel) 82%, transparent);
     border: 1px solid var(--border);
-    border-radius: 9px;
+    border-radius: var(--radius-lg);
     box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.22);
   }
   .tab-btn {
@@ -70,7 +70,7 @@
     align-items: center;
     justify-content: center;
     gap: 7px;
-    padding: 7px 13px;
+    padding: 6px 12px;
     color: var(--text-secondary);
     font-size: 0.8rem;
     font-weight: 600;

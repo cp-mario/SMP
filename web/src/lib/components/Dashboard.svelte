@@ -93,7 +93,7 @@
         <div class="server-meta">
           <div class="meta-item">
             <span class="meta-label">Version</span>
-            <span class="meta-value" title={`${s.loader_version || "—"}${s.loader_build ? ` / ${s.loader_build}` : ""}`}>
+            <span class="meta-value" title={`${s.loader_version || "—"}${s.loader_build ? `/${s.loader_build}` : ""}`}>
               {s.loader_version || "—"}{#if s.loader_build}<span class="meta-sub"> / {s.loader_build}</span>{/if}
             </span>
           </div>
@@ -132,12 +132,25 @@
 <style>
   
 
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 14px; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(318px, 1fr));
+    gap: 12px;
+    /* One compositor-only entrance for the whole list; cards themselves stay static. */
+    animation: cards-in 240ms var(--ease-out) both;
+  }
+  @keyframes cards-in {
+    from { opacity: 0; transform: translate3d(0, 5px, 0); }
+    to { opacity: 1; transform: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .grid { animation: none; }
+  }
 
   .server-card {
     position: relative;
     gap: 0;
-    padding: 16px;
+    padding: 15px;
     cursor: pointer;
   }
   .card-link {
@@ -153,10 +166,10 @@
     position: absolute;
     inset: 0;
     pointer-events: none;
-    background: radial-gradient(420px 120px at 10% 0%, hsla(var(--avatar-hue), 60%, 60%, 0.06), transparent 70%);
+    background: radial-gradient(340px 90px at 8% 0%, hsla(var(--avatar-hue), 42%, 60%, 0.045), transparent 72%);
     border-radius: inherit;
   }
-  .server-card.running { border-color: color-mix(in srgb, var(--success) 18%, var(--border)); }
+  .server-card.running { border-color: color-mix(in srgb, var(--success) 15%, var(--border)); }
 
   .server-head { position: relative; z-index: 1; display: flex; align-items: center; gap: 11px; min-width: 0; }
   .server-avatar {
@@ -168,12 +181,12 @@
     height: 40px;
     flex: 0 0 auto;
     overflow: hidden;
-    color: hsl(var(--avatar-hue), 60%, 78%);
-    font-size: 0.95rem;
-    font-weight: 800;
-    background: linear-gradient(145deg, hsla(var(--avatar-hue), 55%, 55%, 0.22), hsla(var(--avatar-hue), 55%, 55%, 0.08));
-    border: 1px solid hsla(var(--avatar-hue), 55%, 60%, 0.28);
-    border-radius: 9px;
+    color: hsl(var(--avatar-hue), 38%, 80%);
+    font-size: 0.88rem;
+    font-weight: 650;
+    background: linear-gradient(160deg, hsla(var(--avatar-hue), 38%, 55%, 0.17), hsla(var(--avatar-hue), 38%, 55%, 0.06));
+    border: 1px solid hsla(var(--avatar-hue), 38%, 62%, 0.22);
+    border-radius: 5px;
   }
   .server-avatar img {
     position: absolute;
@@ -184,7 +197,7 @@
     border-radius: inherit;
   }
   .server-title { flex: 1; min-width: 0; }
-  .server-name { overflow: hidden; font-size: 0.94rem; font-weight: 700; letter-spacing: -0.01em; text-overflow: ellipsis; white-space: nowrap; }
+  .server-name { overflow: hidden; font-size: 0.91rem; font-weight: 650; letter-spacing: -0.012em; text-overflow: ellipsis; white-space: nowrap; }
   .server-tags { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 5px; }
   .server-chevron { display: inline-flex; color: var(--text-disabled); transition: color var(--t-fast), transform var(--t-fast); }
   .server-card:hover .server-chevron { color: var(--text-secondary); transform: translateX(2px); }
@@ -195,8 +208,8 @@
     display: grid;
     grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 0.8fr);
     gap: 8px;
-    margin: 14px 0;
-    padding: 10px 12px;
+    margin: 13px 0;
+    padding: 9px 11px;
     background: color-mix(in srgb, var(--input-bg) 72%, transparent);
     border: 1px solid var(--border);
     border-radius: var(--radius);
@@ -209,8 +222,13 @@
   .server-actions { position: relative; z-index: 3; display: flex; gap: 7px; flex-wrap: wrap; margin-top: auto; }
 
   @media (max-width: 560px) {
-    .grid { grid-template-columns: minmax(0, 1fr); }
+    .grid { grid-template-columns: minmax(0, 1fr); gap: 10px; }
     .server-meta { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
     .meta-item:last-child { display: none; }
+  }
+
+  @media (max-width: 380px) {
+    .server-card { padding: 13px; }
+    .server-actions { gap: 6px; }
   }
 </style>

@@ -2648,6 +2648,48 @@ async function handleServerFiles(req, serverId, rest, query) {
     if (!dir) return err("Forbidden", 403);
     if (!existsSync(dir)) return j({ files: [] });
     if (!statSync(dir).isDirectory()) return err("Not found", 404);
+
+    // Recursive name search under the requested folder. Bounded by depth, visited
+    // entries and matches so a huge world folder cannot stall the panel; the UI
+    // gets `truncated` so it can tell the user to narrow the term.
+    const searchTerm = String(query?.q ?? "").trim().toLowerCase();
+    if (searchTerm) {
+      const limit = Math.min(500, Math.max(1, Number(query?.limit) || 200));
+      const maxVisited = 40000;
+      const maxDepth = 16;
+      const found = [];
+      let visited = 0;
+      let truncated = false;
+      const walk = async (absDir, relDir, depth) => {
+        if (truncated || depth > maxDepth) return;
+        let dirents;
+        try { dirents = await readdir(absDir, { withFileTypes: true }); } catch { return; }
+        if (dirents.length > 1) dirents.sort((a, b) => a.name.localeCompare(b.name));
+        for (const e of dirents) {
+          if (truncated) return;
+          if (e.isSymbolicLink()) continue;
+          if (++visited > maxVisited) { truncated = true; return; }
+          const isDir = e.isDirectory();
+          const relChild = relDir ? `${relDir}/${e.name}` : e.name;
+          if (e.name.toLowerCase().includes(searchTerm)) {
+            let size = 0;
+            let mtime = 0;
+            try {
+              const s = await stat(join(absDir, e.name));
+              size = isDir ? 0 : s.size;
+              mtime = s.mtimeMs;
+            } catch { /* unreadable entry: still list it by name */ }
+            found.push({ name: e.name, path: relChild, isDirectory: isDir, size, mtime });
+            if (found.length >= limit) { truncated = true; return; }
+          }
+          if (isDir) await walk(join(absDir, e.name), relChild, depth + 1);
+        }
+      };
+      await walk(dir, targetRel || "", 0);
+      found.sort((a, b) => (b.isDirectory - a.isDirectory) || a.path.localeCompare(b.path));
+      return j({ files: found, path: targetRel || "", query: searchTerm, truncated, visited });
+    }
+
     const dirents = await readdir(dir, { withFileTypes: true });
     const entries = [];
     const chunkSize = 100;

@@ -555,7 +555,7 @@
     height: 30px;
     color: #fff;
     border: 2px solid transparent;
-    border-radius: 8px;
+    border-radius: 5px;
     box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16), var(--shadow-xs);
     cursor: pointer;
     transition: transform var(--t-fast), border-color var(--t-fast), box-shadow var(--t-fast);
@@ -569,7 +569,7 @@
     padding: 0;
     background: var(--input-bg);
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: 4px;
     cursor: pointer;
   }
 
@@ -606,7 +606,7 @@
     color: var(--warning);
     background: var(--warning-soft);
     border: 1px solid var(--warning-border);
-    border-radius: 8px;
+    border-radius: 5px;
   }
   .java-card.installed .java-icon { color: var(--success); background: var(--success-soft); border-color: var(--success-border); }
   .java-main { grid-column: 2; min-width: 0; }
