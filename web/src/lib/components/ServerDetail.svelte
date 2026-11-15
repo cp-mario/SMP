@@ -1208,9 +1208,9 @@
         onInstalled={() => { loadDetail({ quiet: true }); loadModUpdatesList({ force: true }); }}
       />
     {/if}
-    <svelte:fragment slot="footer">
+    {#snippet footer()}
       <Button size="sm" variant="outline" onclick={() => { storeOpen = false; }}>Close</Button>
-    </svelte:fragment>
+    {/snippet}
   </Modal>
 
   <Modal
@@ -1222,44 +1222,42 @@
     closeOnBackdrop={!rawBusy}
     onclose={() => { showRawModal = false; }}
   >
-    <svelte:fragment slot="children">
-      <div class="raw-stack">
-        <Alert tone="danger" title="Advanced — this can break the server">
-          <b>Do not edit these values unless you know exactly what you are doing.</b>
-          This writes directly to the panel database row. A wrong value can stop the server from starting,
-          break the panel, or make this server impossible to manage. There is no undo.
-        </Alert>
-        <Alert tone="warning">
-          Stop the server before saving. Values such as <code>dir</code>, <code>loader</code>,
-          <code>online</code>, <code>pid</code> and <code>exec</code> are especially dangerous.
-          Only change a field if you understand what it does.
-        </Alert>
+    <div class="raw-stack">
+      <Alert tone="danger" title="Advanced — this can break the server">
+        <b>Do not edit these values unless you know exactly what you are doing.</b>
+        This writes directly to the panel database row. A wrong value can stop the server from starting,
+        break the panel, or make this server impossible to manage. There is no undo.
+      </Alert>
+      <Alert tone="warning">
+        Stop the server before saving. Values such as <code>dir</code>, <code>loader</code>,
+        <code>online</code>, <code>pid</code> and <code>exec</code> are especially dangerous.
+        Only change a field if you understand what it does.
+      </Alert>
 
-        {#if rawError}<Alert tone="danger">{rawError}</Alert>{/if}
+      {#if rawError}<Alert tone="danger">{rawError}</Alert>{/if}
 
-        <TextArea
-          bind:value={rawText}
-          label="servers row (JSON)"
-          monospace
-          rows={20}
-          spellcheck="false"
-          disabled={rawBusy}
-          hint="Edit only the values you need. JSON must stay a valid object; the id column is read-only."
-        />
+      <TextArea
+        bind:value={rawText}
+        label="servers row (JSON)"
+        monospace
+        rows={20}
+        spellcheck="false"
+        disabled={rawBusy}
+        hint="Edit only the values you need. JSON must stay a valid object; the id column is read-only."
+      />
 
-        <div class="raw-actions">
-          <Button size="xs" variant="outline" disabled={rawBusy || !rawText} onclick={formatRawJson}><Icon name="sparkles" size={12} /> Format JSON</Button>
-          <Button size="xs" variant="outline" disabled={rawBusy || rawText === rawOriginal} onclick={resetRawText}><Icon name="rotate" size={12} /> Discard changes</Button>
-          {#if server?.online === 1}<span class="muted raw-online">Server is running — stop it before saving.</span>{/if}
-        </div>
-
-        <label class="raw-ack">
-          <input type="checkbox" bind:checked={rawAck} disabled={rawBusy} />
-          <span>I understand that saving wrong values can damage this server and that there is no undo.</span>
-        </label>
+      <div class="raw-actions">
+        <Button size="xs" variant="outline" disabled={rawBusy || !rawText} onclick={formatRawJson}><Icon name="sparkles" size={12} /> Format JSON</Button>
+        <Button size="xs" variant="outline" disabled={rawBusy || rawText === rawOriginal} onclick={resetRawText}><Icon name="rotate" size={12} /> Discard changes</Button>
+        {#if server?.online === 1}<span class="muted raw-online">Server is running — stop it before saving.</span>{/if}
       </div>
-    </svelte:fragment>
-    <svelte:fragment slot="footer">
+
+      <label class="raw-ack">
+        <input type="checkbox" bind:checked={rawAck} disabled={rawBusy} />
+        <span>I understand that saving wrong values can damage this server and that there is no undo.</span>
+      </label>
+    </div>
+    {#snippet footer()}
       <Button size="sm" variant="outline" disabled={rawBusy} onclick={() => { showRawModal = false; }}>Cancel</Button>
       <Button
         size="sm"
@@ -1269,7 +1267,7 @@
         idle={rawText === rawOriginal || !rawAck}
         onclick={saveRawConfig}
       ><Icon name="save" size={13} /> Save raw values</Button>
-    </svelte:fragment>
+    {/snippet}
   </Modal>
 {/if}
 

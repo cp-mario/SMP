@@ -686,7 +686,7 @@
 </div>
 
 <Modal bind:open={detailsOpen} title={detailsProject?.title || "Details"} subtitle={detailsProject ? `${sourceName(detailsProject.source || source)}${detailsProject.author ? ` · ${detailsProject.author}` : ""}` : ""} size="xl" onclose={closeDetails}>
-  <svelte:fragment>
+
     {#if detailsError}
       <Alert tone="danger">{detailsError}</Alert>
     {:else if detailsLoading}
@@ -790,8 +790,8 @@
         {/if}
       </div>
     {/if}
-  </svelte:fragment>
-  <svelte:fragment slot="footer">
+
+  {#snippet footer()}
     {#if effectiveType === "modpack"}
       <Button size="sm" variant="outline" disabled={installBusy} onclick={closeDetails}>Close</Button>
       <Button size="sm" variant="primary" loading={installBusy} disabled={!detailsVersionId || detailsLoading} onclick={openPackCreate}><Icon name="plus" size={13} /> Create server from this modpack</Button>
@@ -799,11 +799,11 @@
       <Button size="sm" variant="outline" disabled={installBusy} onclick={closeDetails}>Close</Button>
       <Button size="sm" variant="primary" loading={installBusy} disabled={!canInstall || !detailsVersionId || detailsLoading} onclick={installSelected}><Icon name="download" size={13} /> Install {targetServer ? `to ${targetServer.name}` : ""}</Button>
     {/if}
-  </svelte:fragment>
+  {/snippet}
 </Modal>
 
 <Modal bind:open={packOpen} title="Create server from modpack" subtitle={detailsProject?.title} size="md" onclose={() => (packOpen = false)} dismissible={!packBusy}>
-  <svelte:fragment>
+
     <div class="stack">
       {#if packError}<Alert tone="danger">{packError}</Alert>{/if}
       <TextField bind:value={packName} label="Server name" placeholder="My modpack server" disabled={packBusy} autofocus />
@@ -818,15 +818,15 @@
       </div>
       <Alert tone="info">The panel downloads the modpack, installs its loader, applies overrides and downloads every server-side file. This can take a while.</Alert>
     </div>
-  </svelte:fragment>
-  <svelte:fragment slot="footer">
+
+  {#snippet footer()}
     <Button size="sm" variant="outline" disabled={packBusy} onclick={() => (packOpen = false)}>Cancel</Button>
     <Button size="sm" variant="primary" loading={packBusy} disabled={!packName.trim()} onclick={createPackServer}><Icon name="plus" size={13} /> Create server</Button>
-  </svelte:fragment>
+  {/snippet}
 </Modal>
 
 <Modal bind:open={installOpen} title="Install to server" subtitle={installProject?.title || ""} size="lg" dismissible={!installBusy} onclose={() => { installOpen = false; installProject = null; }}>
-  <svelte:fragment>
+
     <div class="stack">
       <Alert tone="info">
         Pick the server that should receive this {effectiveType}. Incompatible servers are greyed out: you can still choose them, but the files may not load.
@@ -871,15 +871,15 @@
         {/if}
       {/if}
     </div>
-  </svelte:fragment>
-  <svelte:fragment slot="footer">
+
+  {#snippet footer()}
     <Button size="sm" variant="outline" disabled={installBusy} onclick={() => { installOpen = false; installProject = null; }}>Cancel</Button>
     <Button size="sm" variant="primary" disabled={!installTargetId || !!installTargetCompat?.blocking} onclick={confirmInstallTarget}><Icon name="arrow-right" size={13} /> Continue</Button>
-  </svelte:fragment>
+  {/snippet}
 </Modal>
 
 <Modal bind:open={targetPickerOpen} title="Use server target" subtitle="Choose a server or a loader / version for the search" size="lg" onclose={() => (targetPickerOpen = false)}>
-  <svelte:fragment>
+
     <div class="stack">
       <Segmented
         bind:value={targetMode}
@@ -927,15 +927,15 @@
         <div class="muted">The destination server does not change; this loader / version is only used to search. Install compatibility still follows the destination server.</div>
       {/if}
     </div>
-  </svelte:fragment>
-  <svelte:fragment slot="footer">
+
+  {#snippet footer()}
     <Button size="sm" variant="outline" onclick={() => (targetPickerOpen = false)}>Cancel</Button>
     {#if targetMode === "server"}
       <Button size="sm" variant="primary" disabled={!targetServerChoice} onclick={applyTargetServer}><Icon name="server" size={13} /> Use server</Button>
     {:else}
       <Button size="sm" variant="primary" disabled={!targetLoaderChoice && !targetVersionChoice} onclick={applyManualTarget}><Icon name="check" size={13} /> Use loader / version</Button>
     {/if}
-  </svelte:fragment>
+  {/snippet}
 </Modal>
 
 <style>

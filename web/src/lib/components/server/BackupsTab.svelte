@@ -539,77 +539,71 @@
 </div>
 
 <Modal bind:open={showCreate} title="New backup" subtitle={server?.name || ""} size="sm" dismissible={!createBusy} closeOnBackdrop={!createBusy} onclose={() => { showCreate = false; }}>
-  <svelte:fragment slot="children">
-    <div class="modal-stack">
-      {#if server?.online === 1}
-        <Alert tone="warning">The server is running. For a fully consistent world, stop it before creating the backup.</Alert>
-      {/if}
-      <TextField
-        bind:value={createName}
-        label="Name"
-        placeholder={nextLabel}
-        maxlength="120"
-        hint={`Optional. Leave empty to use "${nextLabel}".`}
-        disabled={createBusy}
-        autofocus
-      />
-    </div>
-  </svelte:fragment>
-  <svelte:fragment slot="footer">
+  <div class="modal-stack">
+    {#if server?.online === 1}
+      <Alert tone="warning">The server is running. For a fully consistent world, stop it before creating the backup.</Alert>
+    {/if}
+    <TextField
+      bind:value={createName}
+      label="Name"
+      placeholder={nextLabel}
+      maxlength="120"
+      hint={`Optional. Leave empty to use "${nextLabel}".`}
+      disabled={createBusy}
+      autofocus
+    />
+  </div>
+  {#snippet footer()}
     <Button size="sm" variant="outline" disabled={createBusy} onclick={() => (showCreate = false)}>Cancel</Button>
     <Button size="sm" variant="primary" loading={createBusy} onclick={handleCreate}>
       <Icon name="archive" size={13} /> Create backup
     </Button>
-  </svelte:fragment>
+  {/snippet}
 </Modal>
 
 <Modal bind:open={showDownload} title="Download backup" subtitle={downloadTarget ? backupName(downloadTarget) : ""} size="md" onclose={() => { showDownload = false; downloadTarget = null; }}>
-  <svelte:fragment slot="children">
-    <div class="download-options">
-      <button type="button" class="download-option" onclick={() => downloadBackup("tar.zst")}>
-        <span class="download-option-icon"><Icon name="archive" size={22} /></span>
-        <span class="download-option-body">
-          <span class="download-option-title">
-            .tar.zst
-            <span class="download-option-badge">Smaller · faster</span>
-          </span>
-          <span class="download-option-desc">
-            Smaller file and the fastest download: it is already compressed, so the server sends it directly without extra work.
-            Requires 7-Zip, Zstandard or another program that supports .tar.zst.
-          </span>
+  <div class="download-options">
+    <button type="button" class="download-option" onclick={() => downloadBackup("tar.zst")}>
+      <span class="download-option-icon"><Icon name="archive" size={22} /></span>
+      <span class="download-option-body">
+        <span class="download-option-title">
+          .tar.zst
+          <span class="download-option-badge">Smaller · faster</span>
         </span>
-      </button>
-      <button type="button" class="download-option" onclick={() => downloadBackup("zip")}>
-        <span class="download-option-icon"><Icon name="file" size={22} /></span>
-        <span class="download-option-body">
-          <span class="download-option-title">
-            ZIP
-            <span class="download-option-badge compat">Compatible with almost everything</span>
-          </span>
-          <span class="download-option-desc">
-            Opens almost anywhere, but the file is larger and must be converted on the fly, so it takes longer to download.
-          </span>
+        <span class="download-option-desc">
+          Smaller file and the fastest download: it is already compressed, so the server sends it directly without extra work.
+          Requires 7-Zip, Zstandard or another program that supports .tar.zst.
         </span>
-      </button>
-    </div>
-  </svelte:fragment>
+      </span>
+    </button>
+    <button type="button" class="download-option" onclick={() => downloadBackup("zip")}>
+      <span class="download-option-icon"><Icon name="file" size={22} /></span>
+      <span class="download-option-body">
+        <span class="download-option-title">
+          ZIP
+          <span class="download-option-badge compat">Compatible with almost everything</span>
+        </span>
+        <span class="download-option-desc">
+          Opens almost anywhere, but the file is larger and must be converted on the fly, so it takes longer to download.
+        </span>
+      </span>
+    </button>
+  </div>
 </Modal>
 
 <Modal bind:open={showRename} title="Rename backup" size="sm" dismissible={!renameBusy} closeOnBackdrop={!renameBusy} onclose={() => { showRename = false; }}>
-  <svelte:fragment slot="children">
-    <TextField
-      bind:value={renameName}
-      label="Backup name"
-      maxlength="120"
-      hint="The date and time are kept and added to the download filename automatically."
-      disabled={renameBusy}
-      autofocus
-    />
-  </svelte:fragment>
-  <svelte:fragment slot="footer">
+  <TextField
+    bind:value={renameName}
+    label="Backup name"
+    maxlength="120"
+    hint="The date and time are kept and added to the download filename automatically."
+    disabled={renameBusy}
+    autofocus
+  />
+  {#snippet footer()}
     <Button size="sm" variant="outline" disabled={renameBusy} onclick={() => (showRename = false)}>Cancel</Button>
     <Button size="sm" variant="primary" loading={renameBusy} disabled={!renameDirty} idle={!renameDirty} onclick={handleRename}><Icon name="save" size={13} /> Save name</Button>
-  </svelte:fragment>
+  {/snippet}
 </Modal>
 
 <ConfirmDialog

@@ -322,7 +322,7 @@
     />
   </div>
 
-  <svelte:fragment slot="footer">
+  {#snippet footer()}
     <Button size="sm" variant="outline" disabled={loaderBusy} onclick={() => (open = false)}>Cancel</Button>
     <Button
       size="sm"
@@ -334,7 +334,7 @@
     >
       Apply changes
     </Button>
-  </svelte:fragment>
+  {/snippet}
 </Modal>
 
 <style>

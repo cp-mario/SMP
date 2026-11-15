@@ -323,7 +323,7 @@
         </div>
       {/if}
   </div>
-  <div slot="footer">
+  {#snippet footer()}
     <div class="footer-left">
       {#if onopenblank}
         <Button size="sm" variant="outline" disabled={busy} onclick={() => { open = false; reset(); onopenblank(); }}><Icon name="plus" size={13} /> Blank server</Button>
@@ -333,7 +333,7 @@
       <Button size="sm" variant="outline" disabled={busy} onclick={close}>Cancel</Button>
       <Button size="sm" variant="primary" loading={busy} disabled={!name.trim() || (source !== "custom" && !selectedPack)} onclick={createServer}><Icon name="plus" size={13} /> Create server</Button>
     </div>
-  </div>
+  {/snippet}
 </Modal>
 
 <style>

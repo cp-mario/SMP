@@ -590,10 +590,10 @@
       </p>
       <p class="muted eula-note">If you do not accept it, the server will not start.</p>
     </div>
-    <svelte:fragment slot="footer">
+    {#snippet footer()}
       <button class="btn btn-outline btn-sm" type="button" disabled={eulaBusy} onclick={closeEula}>Do not accept</button>
       <button class="btn btn-primary btn-sm" type="button" disabled={eulaBusy} onclick={handleEulaAccept}>{eulaBusy ? "Working…" : (eulaAction === "restart" ? "Accept and restart" : "Accept and start")}</button>
-    </svelte:fragment>
+    {/snippet}
   </Modal>
 
   <ConfirmDialog

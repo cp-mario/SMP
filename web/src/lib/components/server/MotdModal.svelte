@@ -180,10 +180,10 @@
       </div>
   </div>
 
-  <div slot="footer" class="modal-footer">
+  {#snippet footer()}
     <Button size="sm" variant="outline" disabled={iconBusy} onclick={() => (open = false)}>Cancel</Button>
     <Button size="sm" variant="primary" loading={iconBusy} disabled={!motdDirty} idle={!motdDirty} onclick={handleSave}>Save</Button>
-  </div>
+  {/snippet}
 </Modal>
 
 <style>
