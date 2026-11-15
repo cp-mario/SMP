@@ -1,11 +1,11 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 // Version helper for the release workflows (and for local use).
 //
 // The root package.json is the single source of truth for the panel version.
 //
-//   node scripts/version.js bump            # 0.1.0 -> 0.1.1, prints the new version
-//   node scripts/version.js set 1.2.3       # write an exact version, prints it
-//   node scripts/version.js get             # print the current version
+//   bun scripts/version.js bump            # 0.1.0 -> 0.1.1, prints the new version
+//   bun scripts/version.js set 1.2.3       # write an exact version, prints it
+//   bun scripts/version.js get             # print the current version
 //
 // Exit codes: 0 ok, 1 usage/validation error, 2 already up to date (set).
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -62,7 +62,7 @@ function main() {
   if (cmd === "set") {
     const parsed = parseVersion(arg);
     if (!parsed) {
-      console.error(`Usage: node scripts/version.js set <major.minor.patch> (got "${arg ?? ""}")`);
+      console.error(`Usage: bun scripts/version.js set <major.minor.patch> (got "${arg ?? ""}")`);
       process.exit(1);
     }
     const next = parsed.join(".");
@@ -76,7 +76,7 @@ function main() {
     return;
   }
 
-  console.error("Usage: node scripts/version.js <bump|set <version>|get>");
+  console.error("Usage: bun scripts/version.js <bump|set <version>|get>");
   process.exit(1);
 }
 

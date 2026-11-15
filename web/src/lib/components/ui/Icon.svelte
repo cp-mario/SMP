@@ -2,7 +2,7 @@
   import { cx } from "./cx.js";
 
   /**
-   * Icon set. The markup lives in `public/icons/ui/<name>.svg` and is inlined at
+   * Icon set. The markup lives in `src/icons/ui/<name>.svg` and is inlined at
    * build time so it can inherit the surrounding text colour (`currentColor`)
    * and honour the `strokeWidth` prop.
    */
@@ -14,7 +14,7 @@
     label = "",
   } = $props();
 
-  const modules = import.meta.glob("/public/icons/ui/*.svg", {
+  const modules = import.meta.glob("/src/icons/ui/*.svg", {
     query: "?raw",
     import: "default",
     eager: true,
@@ -29,7 +29,7 @@
   }
 
   const markup = $derived(
-    innerMarkup(modules[`/public/icons/ui/${name}.svg`] || modules["/public/icons/ui/info.svg"] || "")
+    innerMarkup(modules[`/src/icons/ui/${name}.svg`] || modules["/src/icons/ui/info.svg"] || "")
   );
 </script>
 

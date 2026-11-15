@@ -39,10 +39,10 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set up Node
-        uses: actions/setup-node@v4
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
         with:
-          node-version: 20
+          bun-version: latest
 
       - name: Sync package.json with the release tag
         id: sync
@@ -55,8 +55,8 @@ jobs:
             echo "changed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          BEFORE="$(node scripts/version.js get)"
-          if node scripts/version.js set "$VERSION"; then
+          BEFORE="$(bun scripts/version.js get)"
+          if bun scripts/version.js set "$VERSION"; then
             echo "version=$VERSION" >> "$GITHUB_OUTPUT"
             echo "changed=true" >> "$GITHUB_OUTPUT"
             echo "package.json: $BEFORE -> $VERSION"

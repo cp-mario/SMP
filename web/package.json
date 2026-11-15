@@ -4,26 +4,21 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "node ./node_modules/vite-plus/bin/vp dev",
-    "build": "node ./node_modules/vite-plus/bin/vp build",
-    "preview": "node ./node_modules/vite-plus/bin/vp preview",
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
     "check": "svelte-check --output human",
     "test": "bun test ./tests"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^7.3.1",
+    "jsdom": "^26.1.0",
     "svelte": "^5.57.3",
-    "vite-plus": "1.6.0"
+    "svelte-check": "^4.7.8",
+    "vite": "^8.3.8"
   },
   "dependencies": {
     "@webcoder49/code-input": "2.9.0",
     "highlight.js": "^11.12.0"
-  },
-  "overrides": {
-    "vite": "npm:@voidzero-dev/vite-plus-core@1.6.0"
-  },
-  "trustedDependencies": [
-    "core-js",
-    "esbuild"
-  ]
+  }
 }

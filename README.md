@@ -52,26 +52,29 @@ The download replaces the installation (the previous one is kept until the new o
 
 ## Development
 
-Requirements: [Bun](https://bun.sh) >= 1.4.4 (Node is only needed for the release helper scripts).
+Requirements: [Bun](https://bun.sh) >= 1.4.4 (no Node.js needed).
 
 ```sh
 git clone https://github.com/cp-mario/SMP
 cd SMP
+bun install
 
-# server (API, port 3001)
-cd server && bun install && bun run dev
-
-# web (panel, port 5173, proxies /api to 3001)
-cd web && bun install && bun run dev
+# API (:3001) + web panel (:5173) with hot reload
+bun run dev
 ```
+
+Open http://localhost:5173: the Vite dev server (rolldown) reloads the panel on every change and proxies `/api` to `http://localhost:3001`.
+
+`bun run start` builds the panel once and serves it from the Bun API at http://localhost:3001, without hot reload.
 
 Root scripts (run from the repository root, after installing `server/` and `web/`):
 
 | Script | Description |
 | --- | --- |
-| `bun run start` / `dev` | `start.js`: install, build and launch the panel |
+| `bun run dev` | `dev.js`: start the API and the Vite dev server with hot reload |
+| `bun run start` | `start.js`: install, build and launch the panel (no hot reload) |
 | `bun run build` | Build the web panel into `server/src/public` |
-| `bun run build:web` | Same as `build` (Vite+ CLI wrapper) |
+| `bun run build:web` | Same as `build` |
 | `bun run build:server` | Compile the API into `server/dist/smp` |
 | `bun run check` | `svelte-check` for the web app |
 | `bun test` | Web tests (`web/tests`) |
@@ -102,7 +105,8 @@ The data directory contains `smp.sqlite` (servers, settings, mods, backups, sche
 ```
 install.sh / install.ps1   one-shot installers (GitHub release -> /opt/smp or %LOCALAPPDATA%\SMP)
 start.js                   launcher (port check, deps, build, run)
-scripts/                   version helper (bump/set/get) and Vite+ wrapper used by package.json
+dev.js                     dev launcher (API + Vite dev server with hot reload)
+scripts/                   bun executable lookup and version helper (bump/set/get)
 server/                    Elysia API (Bun): loaders, mods, backups, files, SFTP, Java, self-update
 web/                       Svelte 5 + Vite web panel (see web/README.md)
 .github/workflows/         pre-release + version sync automation

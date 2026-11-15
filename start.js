@@ -5,6 +5,7 @@ import path from "path";
 import net from "net";
 import { fileURLToPath } from "url";
 import readline from "readline";
+import { bunCommand } from "./scripts/bun-bin.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -12,20 +13,6 @@ const root = __dirname;
 const serverDir = path.join(root, "server");
 const webDir = path.join(root, "web");
 const DEFAULT_PORT = Number(process.env.SMP_PORT || 3001);
-
-function bunCommand() {
-  // Prefer a real bun executable over a shell shim on Windows.
-  if (process.platform === "win32") {
-    const home = process.env.USERPROFILE || process.env.HOME || "";
-    const candidates = [
-      path.join(home, ".bun", "bin", "bun.exe"),
-      path.join(process.env.LOCALAPPDATA || "", "Microsoft", "WindowsApps", "bun.exe"),
-      path.join(process.env.APPDATA || "", "npm", "bun.cmd"),
-    ];
-    for (const c of candidates) if (c && existsSync(c)) return c;
-  }
-  return "bun";
-}
 
 function run(cmd, args, cwd, label) {
   return new Promise((resolve) => {
@@ -199,10 +186,9 @@ async function askChoice(port, probe) {
 
   if (process.env.SMP_SKIP_BUILD !== "1") {
     console.log("Building web app...");
-    // Run the Vite+ CLI with Bun directly. `bun --bun run build` still resolved
-    // the package script to the Node shim on Windows, so invoke the JS entry.
-    const vpBin = path.join(webDir, "node_modules", "vite-plus", "dist", "bin.js");
-    const buildCode = await run(bunCommand(), [vpBin, "build"], webDir, "web-build");
+    // Build with the plain Vite CLI (rolldown) through Bun, no Node involved.
+    const viteBin = path.join(webDir, "node_modules", "vite", "bin", "vite.js");
+    const buildCode = await run(bunCommand(), [viteBin, "build"], webDir, "web-build");
     if (buildCode !== 0) { console.error("Web build failed; aborting."); process.exit(buildCode); }
   } else {
     console.log("Skipping web build (SMP_SKIP_BUILD=1).");

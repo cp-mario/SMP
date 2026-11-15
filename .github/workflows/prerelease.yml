@@ -40,10 +40,10 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set up Node
-        uses: actions/setup-node@v4
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
         with:
-          node-version: 20
+          bun-version: latest
 
       - name: Detect automated commits
         id: guard
@@ -61,8 +61,8 @@ jobs:
         if: steps.guard.outputs.skip != 'true'
         run: |
           set -euo pipefail
-          CURRENT="$(node scripts/version.js get)"
-          NEXT="$(node scripts/version.js bump)"
+          CURRENT="$(bun scripts/version.js get)"
+          NEXT="$(bun scripts/version.js bump)"
           echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
           echo "version=$NEXT" >> "$GITHUB_OUTPUT"
           echo "tag=v$NEXT" >> "$GITHUB_OUTPUT"
