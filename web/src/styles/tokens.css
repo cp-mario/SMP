@@ -95,3 +95,53 @@
   --z-modal: 100;
   --z-toast: 900;
 }
+
+/* ==========================================================================
+   Light theme
+   Activated by setting data-theme="light" on <html>.
+   ========================================================================== */
+[data-theme="light"] {
+  color-scheme: light;
+
+  /* Canvas & surfaces */
+  --bg: #f5f5f7;
+  --bg-soft: #eaeaee;
+  --sidebar: #f0f0f3;
+  --panel: #ffffff;
+  --panel-elevated: #f8f8fa;
+  --panel-hover: #f0f0f3;
+  --input-bg: #f5f5f7;
+
+  /* Borders */
+  --border: #d8d8de;
+  --border-secondary: #c8c8d0;
+  --border-strong: #a8a8b2;
+  --hairline: rgba(0, 0, 0, 0.06);
+
+  /* Text */
+  --text: #1a1a1e;
+  --text-secondary: #5a5a64;
+  --text-disabled: #9a9aa2;
+  --muted: #7a7a84;
+
+  /* Semantic tones */
+  --success: #2ea872;
+  --success-soft: rgba(46, 168, 114, 0.1);
+  --success-border: rgba(46, 168, 114, 0.3);
+  --danger: #d44038;
+  --danger-soft: rgba(212, 64, 56, 0.1);
+  --danger-border: rgba(212, 64, 56, 0.32);
+  --warning: #c48820;
+  --warning-soft: rgba(196, 136, 32, 0.1);
+  --warning-border: rgba(196, 136, 32, 0.32);
+  --info: #3880d4;
+  --info-soft: rgba(56, 128, 212, 0.1);
+  --info-border: rgba(56, 128, 212, 0.3);
+
+  /* Elevation — lighter shadows for light mode */
+  --shadow-xs: 0 1px 1px rgb(0 0 0 / 0.08);
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.1), 0 3px 8px -4px rgb(0 0 0 / 0.12);
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.12), 0 10px 26px -18px rgb(0 0 0 / 0.2);
+  --shadow-lg: 0 2px 6px rgb(0 0 0 / 0.14), 0 28px 56px -28px rgb(0 0 0 / 0.28);
+  --edge: inset 0 1px 0 rgba(0, 0, 0, 0.04);
+}

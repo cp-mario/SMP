@@ -50,3 +50,43 @@ export function applyStoredAccent() {
   const saved = readStoredAccent();
   return applyAccent(saved || DEFAULT_ACCENT, { persist: false });
 }
+
+// ---------- Light / Dark theme ----------
+
+export const DEFAULT_THEME = "dark";
+const THEME_STORAGE_KEY = "smp.theme";
+
+/**
+ * Apply a theme (dark or light) to the document.
+ * @param {"dark"|"light"} theme
+ * @param {{ persist?: boolean }} [options]
+ */
+export function applyTheme(theme, { persist = true } = {}) {
+  if (typeof document === "undefined") return theme || DEFAULT_THEME;
+  const t = (theme === "light" ? "light" : "dark");
+  document.documentElement.setAttribute("data-theme", t);
+  if (persist) {
+    try { localStorage.setItem(THEME_STORAGE_KEY, t); } catch { /* storage may be unavailable */ }
+  }
+  return t;
+}
+
+/** Read the persisted theme (if any) without applying it. */
+export function readStoredTheme() {
+  try {
+    const stored = localStorage.getItem(THEME_STORAGE_KEY);
+    return stored === "light" ? "light" : "dark";
+  } catch { return DEFAULT_THEME; }
+}
+
+/** Read the persisted theme (if any) and apply it before the app mounts. */
+export function applyStoredTheme() {
+  const saved = readStoredTheme();
+  return applyTheme(saved, { persist: false });
+}
+
+/** Toggle between light and dark theme. */
+export function toggleTheme() {
+  const current = readStoredTheme();
+  return applyTheme(current === "light" ? "dark" : "light");
+}

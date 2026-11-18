@@ -1,5 +1,6 @@
 <script>
   import { router, requestNewServer } from "../router.js";
+  import { readStoredTheme, toggleTheme } from "../theme.js";
   import Button from "./ui/Button.svelte";
   import Icon from "./ui/Icon.svelte";
 
@@ -23,6 +24,12 @@
   let total = $derived(servers.length);
 
   const initial = (name) => (String(name || "?").trim().charAt(0) || "?").toUpperCase();
+
+  let currentTheme = $state(readStoredTheme());
+  function handleThemeToggle() {
+    toggleTheme();
+    currentTheme = currentTheme === "light" ? "dark" : "light";
+  }
 </script>
 
 <aside class="sidebar">
@@ -99,6 +106,13 @@
     <div class="panel-status">
       <span class="status-dot" class:offline={onlineCount === 0}></span>
       <span>{onlineCount === 0 ? "All instances stopped" : `${onlineCount} instance${onlineCount === 1 ? "" : "s"} running`}</span>
+      <button type="button" class="theme-toggle-btn" aria-label="Toggle theme" onclick={handleThemeToggle}>
+        {#if currentTheme === "light"}
+          <Icon name="moon" size={14} />
+        {:else}
+          <Icon name="sun" size={14} />
+        {/if}
+      </button>
     </div>
   </div>
 </aside>
@@ -307,6 +321,25 @@
     font-size: 0.72rem;
   }
   .panel-status span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .theme-toggle-btn {
+    display: grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    flex: 0 0 auto;
+    margin-left: auto;
+    color: var(--text-disabled);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: color var(--t-fast), background var(--t-fast), border-color var(--t-fast);
+  }
+  .theme-toggle-btn:hover {
+    color: var(--text);
+    background: var(--panel-elevated);
+    border-color: var(--border);
+  }
 
   @media (max-width: 900px) {
     .sidebar { display: none; }
