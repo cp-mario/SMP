@@ -4,6 +4,7 @@ node_modules/
 
 # AI
 .playwright-mcp
+.junie
 
 # Package manager / lock artifacts (keep bun.lock)
 .bun.lockb
