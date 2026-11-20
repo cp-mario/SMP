@@ -379,6 +379,12 @@ export function peekUpdateState(channel = "") {
 
 // ============ SELF-UPDATE ============
 
+// The panel exits with this code after handing an update to the detached updater
+// when a terminal launcher (start.js) owns it. The launcher then waits for the
+// file swap and restarts the panel in the foreground, so the terminal stays
+// blocked and Ctrl+C keeps working. Must match start.js.
+export const UPDATE_RESTART_EXIT = 86;
+
 function updateSteps() {
   return [
     { id: "stop-servers", label: "Close all active servers", status: "done" },
@@ -446,12 +452,15 @@ function cleanupStaleStages() {
  */
 const UPDATER_HELPER = `
 import { spawn } from "child_process";
-import { appendFileSync, openSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync } from "fs";
+import { appendFileSync, openSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from "fs";
 import { basename, dirname, join } from "path";
 import { homedir } from "os";
 
-const [, , pidArg, stageDir, installDir, entry] = process.argv;
+const [, , pidArg, stageDir, installDir, entry, statusFile, relaunchArg] = process.argv;
 const pid = Number(pidArg);
+// A terminal launcher (start.js) owns the panel: it stays alive across the swap
+// and restarts the panel itself, so the user keeps control of the process.
+const shouldRelaunch = relaunchArg !== "0";
 const port = Number(process.env.SMP_PORT || process.env.PORT || 3001);
 // The first launch after an update may install dependencies and build the web
 // panel, so allow a generous window before declaring the relaunch failed.
@@ -459,6 +468,12 @@ const panelTimeoutMs = 300000;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const logPath = join(process.env.SMP_DATA_DIR || join(homedir(), ".smp"), "update.log");
 const log = (msg) => { try { appendFileSync(logPath, "[" + new Date().toISOString() + "] " + msg + "\\n"); } catch {} };
+
+/** Hands the swap result to the launcher waiting on the status file. */
+function report(ok, extra) {
+  if (!statusFile) return;
+  try { writeFileSync(statusFile, JSON.stringify({ ok: ok, at: Date.now(), ...(extra || {}) })); } catch {}
+}
 
 async function waitExit(p, timeoutMs) {
   const start = Date.now();
@@ -519,14 +534,22 @@ function relaunch() {
 
 if (!pid || !stageDir || !installDir) process.exit(1);
 log("updater started: pid=" + pid + " stage=" + stageDir + " install=" + installDir);
-if (!(await waitExit(pid, 120000))) { log("updater: the panel did not exit; nothing was changed"); process.exit(1); }
+if (!(await waitExit(pid, 120000))) {
+  log("updater: the panel did not exit; nothing was changed");
+  report(false, { error: "the panel did not exit" });
+  process.exit(1);
+}
 log("updater: panel exited");
 await sleep(1000);
 
 const stageBase = basename(stageDir);
 const tree = join(stageDir, "tree");
 const trash = join(stageDir, "trash");
-if (!existsSync(tree)) { log("updater: no staged tree in " + stageDir + "; nothing was changed"); process.exit(1); }
+if (!existsSync(tree)) {
+  log("updater: no staged tree in " + stageDir + "; nothing was changed");
+  report(false, { error: "the staged tree is missing" });
+  process.exit(1);
+}
 mkdirSync(trash, { recursive: true });
 
 // Move the old installation aside, then the new one in. A single entry that
@@ -547,6 +570,14 @@ try { rmSync(trash, { recursive: true, force: true }); } catch (e) { log("update
 try { rmSync(stageDir, { recursive: true, force: true }); } catch (e) { log("updater: could not remove stage: " + e.message); }
 log("updater: discarded " + stageBase);
 
+// The terminal launcher (start.js) is still running and restarts the panel in
+// the foreground, so the user keeps the terminal and can stop it with Ctrl+C.
+if (!shouldRelaunch) {
+  log("updater: files swapped; the terminal launcher will restart the panel");
+  report(true);
+  process.exit(0);
+}
+
 let child = relaunch();
 let up = child ? await waitPanel(panelTimeoutMs, child) : false;
 if (!up && child && child.exitCode !== null) {
@@ -560,10 +591,10 @@ if (!up) process.exit(1);
 `;
 
 /** Writes the helper to a temp dir and starts it detached for this panel PID. */
-function spawnUpdater({ stage, installDir, entry, pid }) {
+function spawnUpdater({ stage, installDir, entry, pid, relaunch = true, statusFile = "" }) {
   const helperPath = join(tmpdir(), `smp-update-${pid}-${Date.now()}.mjs`);
   writeFileSync(helperPath, UPDATER_HELPER);
-  const child = spawn(process.execPath, [helperPath, String(pid), stage, installDir, entry], { detached: true, stdio: "ignore", env: process.env });
+  const child = spawn(process.execPath, [helperPath, String(pid), stage, installDir, entry, statusFile, relaunch ? "1" : "0"], { detached: true, stdio: "ignore", env: process.env });
   child.unref();
 }
 
@@ -613,8 +644,14 @@ async function downloadSource(version, destPath) {
  * release from GitHub (stable = final releases only, experimental =
  * pre-releases included), downloads the release source archive (tar.gz on
  * Linux/macOS, zip on Windows), stages it inside the installation directory,
- * then hands over to a detached updater that closes the panel, replaces every
- * old file with the new tree and relaunches the launcher.
+ * then hands over to a detached updater that closes the panel and replaces every
+ * old file with the new tree.
+ *
+ * When the panel was started by a terminal launcher (start.js sets
+ * SMP_UPDATE_STATUS), the updater only swaps the files and reports back: the
+ * launcher stays in the foreground and restarts the panel itself, so the
+ * terminal keeps control of the process. Otherwise the updater relaunches the
+ * launcher detached.
  *
  * ROOT_DIR is /opt/smp on Linux and %LOCALAPPDATA%\SMP on Windows, both
  * writable by the user running the panel (no admin needed).
@@ -741,8 +778,12 @@ export async function applyUpdate({ target = "", current = "", channel = "stable
       // Hand over to the detached updater and let this process exit.
       setStep(steps, "install", "pending");
       const entry = join(ROOT_DIR, "start.js");
+      // start.js is attached to a terminal and stays alive across the swap: it
+      // restarts the panel in the foreground (Ctrl+C keeps working) once the
+      // updater reports the result. Without it the updater relaunches detached.
+      const statusFile = process.env.SMP_UPDATE_STATUS || "";
       try {
-        spawnUpdater({ stage, installDir: ROOT_DIR, entry, pid: process.pid });
+        spawnUpdater({ stage, installDir: ROOT_DIR, entry, pid: process.pid, relaunch: !statusFile, statusFile });
       } catch (e) {
         return stageFail("install", "SPAWN_FAILED", `Could not start the updater: ${e?.message || e}`);
       }

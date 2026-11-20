@@ -40,6 +40,19 @@ export const UPDATE_PAGE_HTML = `<!doctype html>
   // updates left "panel relaunched" entries in the same log file.
   const pageStart = Date.now() - 10000;
   let finished = false;
+  // The panel restarts as soon as the files are swapped: a different pid means
+  // the new version is answering, so the page can reload by itself.
+  let initialPid = null;
+
+  async function health() {
+    try {
+      const res = await fetch("/api/health", { cache: "no-store" });
+      if (!res.ok) return null;
+      return await res.json().catch(() => null);
+    } catch {
+      return null;
+    }
+  }
 
   function finish(kind) {
     if (finished) return;
@@ -50,7 +63,8 @@ export const UPDATE_PAGE_HTML = `<!doctype html>
       status.className = "status done";
       status.textContent = "Done";
       hint.hidden = false;
-      hint.textContent = "Go back to the panel tab and reload the page.";
+      hint.textContent = "The panel is coming back. Reloading…";
+      reloadWhenUp();
     } else {
       title.textContent = "Update failed";
       status.className = "status failed";
@@ -60,6 +74,22 @@ export const UPDATE_PAGE_HTML = `<!doctype html>
     }
   }
 
+  // Wait for the restarted panel, then load it instead of asking the user to
+  // reload the page by hand. The first launch after an update may install
+  // dependencies and build the web panel, so this can take a while.
+  async function reloadWhenUp() {
+    const deadline = Date.now() + 600000;
+    while (Date.now() < deadline) {
+      const info = await health();
+      if (info && info.service === "smp" && (initialPid === null || info.pid !== initialPid)) {
+        location.replace("/");
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+    hint.textContent = "The panel is taking too long. Reload this page to open it.";
+  }
+
   function outcome(text) {
     const lines = text.split("\\n");
     for (let i = lines.length - 1; i >= 0; i--) {
@@ -67,6 +97,9 @@ export const UPDATE_PAGE_HTML = `<!doctype html>
       const at = Date.parse((line.match(/^\\[([^\\]]+)\\]/) || [])[1] || "");
       if (!Number.isFinite(at) || at < pageStart) continue;
       if (/updater: panel relaunched/.test(line)) return "done";
+      // start.js owns the terminal: it restarts the panel itself once the
+      // updater reports the swap, so there is no "panel relaunched" line.
+      if (/updater: files swapped/.test(line)) return "done";
       if (/updater: (relaunch FAILED|the panel did not exit)/.test(line)) return "failed";
     }
     return null;
@@ -74,16 +107,20 @@ export const UPDATE_PAGE_HTML = `<!doctype html>
 
   async function poll() {
     if (finished) return;
+    const info = await health();
+    if (info && info.service === "smp") {
+      if (initialPid === null) initialPid = info.pid || null;
+      else if (info.pid && info.pid !== initialPid) return finish("done");
+    }
     try {
       const res = await fetch("/api/updates/log", { cache: "no-store" });
       if (!res.ok) throw new Error(String(res.status));
       const kind = outcome(await res.text());
       if (kind) return finish(kind);
-      status.textContent = "Loading…";
     } catch {
       // The panel is closed while the files are swapped.
-      status.textContent = "Loading…";
     }
+    status.textContent = "Loading…";
     setTimeout(poll, 1000);
   }
   poll();

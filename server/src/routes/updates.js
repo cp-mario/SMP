@@ -3,7 +3,7 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import { db, getSetting } from "../core/db.js";
-import { getUpdateState, applyUpdate, normalizeChannel, defaultChannel } from "../core/version.js";
+import { getUpdateState, applyUpdate, normalizeChannel, defaultChannel, UPDATE_RESTART_EXIT } from "../core/version.js";
 import { stopAllServers } from "../instances/process.js";
 import { stopSftpServer } from "../runtime/sftp.js";
 
@@ -39,7 +39,11 @@ export const updatesRoute = new Elysia({ prefix: "/api/updates" })
     const result = await applyUpdate({ target, current: state.current, channel });
     // The detached updater replaces the installation once this process exits.
     if (result.ok && result.restarting) {
-      setTimeout(() => { try { process.exit(0); } catch {} }, 1500);
+      // start.js is attached to the terminal: exiting with UPDATE_RESTART_EXIT
+      // keeps it alive so it can restart the panel in the foreground (Ctrl+C
+      // still stops it). Without a launcher the updater relaunches detached.
+      const exitCode = process.env.SMP_UPDATE_STATUS ? UPDATE_RESTART_EXIT : 0;
+      setTimeout(() => { try { process.exit(exitCode); } catch {} }, 1500);
     }
     return { ok: result.ok, code: result.code || null, message: result.message || null, target, channel, version: state.current, servers: { total: ids.length, stopped }, applying: true };
   })

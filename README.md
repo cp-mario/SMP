@@ -48,7 +48,7 @@ The panel checks the GitHub releases of the selected channel (stable = final rel
 - Settings → Updates, or
 - `bun run server/src/cli.js update [stable|experimental]`
 
-The download replaces the installation (the previous one is kept until the new one is in place), then the launcher is restarted by the panel. `SMP_REPO` overrides the repository used for updates.
+The download replaces the installation (the previous one is kept until the new one is in place), then the panel restarts itself. When it runs from a terminal (`bun run start`), the launcher keeps the terminal and starts the new version in the foreground, so `Ctrl+C` still stops the panel; the progress page at `/update` reloads on its own once the panel is back. `SMP_REPO` overrides the repository used for updates.
 
 ## Development
 

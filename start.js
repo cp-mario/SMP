@@ -1,8 +1,15 @@
 // SMP start.js - Starts the Bun server (API + static panel)
+//
+// The launcher stays in the foreground for the whole life of the panel:
+// `bun run start` blocks the terminal and Ctrl+C stops the panel. A self-update
+// keeps the terminal attached too: the panel exits with UPDATE_RESTART_EXIT, the
+// detached updater swaps the installation, and this process starts the new
+// version in the foreground.
 import { spawn, execSync } from "child_process";
-import { existsSync } from "fs";
+import { existsSync, readFileSync, rmSync } from "fs";
 import path from "path";
 import net from "net";
+import { tmpdir } from "os";
 import { fileURLToPath } from "url";
 import readline from "readline";
 import { bunCommand } from "./scripts/bun-bin.js";
@@ -15,6 +22,29 @@ const root = __dirname;
 const serverDir = path.join(root, "server");
 const webDir = path.join(root, "web");
 const DEFAULT_PORT = Number(process.env.SMP_PORT || 3001);
+
+// Must match UPDATE_RESTART_EXIT in server/src/core/version.js: the panel exits
+// with it after handing an update to the detached updater, and this process then
+// waits for the swap and restarts the panel.
+const UPDATE_RESTART_EXIT = 86;
+// The detached updater writes the result of the file swap here.
+const UPDATE_STATUS_FILE = path.join(tmpdir(), `smp-update-${process.pid}.json`);
+const UPDATE_WAIT_MS = 5 * 60 * 1000;
+
+let currentServer = null;
+let shuttingDown = false;
+
+function shutdown(code) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  const child = currentServer;
+  currentServer = null;
+  if (child) { try { child.kill(); } catch {} }
+  process.exit(code);
+}
+
+process.on("SIGINT", () => shutdown(0));
+process.on("SIGTERM", () => shutdown(0));
 
 async function ensureDependencies(dir, label) {
   const nodeModules = path.join(dir, "node_modules");
@@ -117,6 +147,55 @@ async function askChoice(port, probe) {
   }
 }
 
+/** Starts the panel and resolves with its exit code once it stops. */
+function startServer(port) {
+  console.log("Starting server...");
+  const env = {
+    ...process.env,
+    SMP_PORT: String(port),
+    PORT: String(port),
+    // This launcher owns the terminal: on a self-update the panel exits with
+    // UPDATE_RESTART_EXIT so this process can start the new version.
+    SMP_UPDATE_STATUS: UPDATE_STATUS_FILE,
+  };
+  const child = spawn(bunCommand(), ["run", "src/index.js"], { cwd: serverDir, stdio: "inherit", detached: false, env });
+  currentServer = child;
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (code) => {
+      if (settled) return;
+      settled = true;
+      currentServer = null;
+      resolve(code);
+    };
+    child.once("error", (error) => {
+      console.error(`[server] could not be started: ${error?.message || error}`);
+      done(1);
+    });
+    child.once("exit", (code) => done(code ?? 0));
+  });
+}
+
+/** Result written by the detached updater once the new tree is installed. */
+function readUpdateStatus() {
+  try { return JSON.parse(readFileSync(UPDATE_STATUS_FILE, "utf8")); } catch { return null; }
+}
+
+async function waitForUpdate() {
+  const started = Date.now();
+  while (Date.now() - started < UPDATE_WAIT_MS) {
+    const status = readUpdateStatus();
+    if (status) return status;
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  }
+  return null;
+}
+
+/** True once the previous panel released the port and the new one can bind it. */
+async function waitForPort(port) {
+  for (let i = 0; i < 50 && !(await isPortFree(port)); i++) await new Promise((resolve) => setTimeout(resolve, 200));
+}
+
 (async () => {
   console.log("Starting SMP...");
   let port = DEFAULT_PORT;
@@ -142,31 +221,48 @@ async function askChoice(port, probe) {
     }
   }
 
-  await ensureDependencies(serverDir, "server");
-  await ensureDependencies(webDir, "web");
+  // A leftover status file from a previous run must not be mistaken for the
+  // result of this update.
+  try { rmSync(UPDATE_STATUS_FILE, { force: true }); } catch {}
 
-  if (process.env.SMP_SKIP_BUILD === "1") {
-    console.log("Skipping web build (SMP_SKIP_BUILD=1).");
-  } else {
-    const build = await ensureWebBuild({ root, webDir, force: process.env.SMP_FORCE_BUILD === "1" });
-    if (!build.ok) {
-      console.error(build.error || "Web build failed; aborting.");
+  for (;;) {
+    await ensureDependencies(serverDir, "server");
+    await ensureDependencies(webDir, "web");
+
+    if (process.env.SMP_SKIP_BUILD === "1") {
+      console.log("Skipping web build (SMP_SKIP_BUILD=1).");
+    } else {
+      const build = await ensureWebBuild({ root, webDir, force: process.env.SMP_FORCE_BUILD === "1" });
+      if (!build.ok) {
+        console.error(build.error || "Web build failed; aborting.");
+        process.exit(1);
+      }
+    }
+
+    // Fail early with a clear message instead of serving "Panel build missing".
+    if (!existsSync(path.join(serverDir, "src", "public", "index.html"))) {
+      console.error("Panel build missing. Run `bun run build`, or start without SMP_SKIP_BUILD=1.");
       process.exit(1);
     }
+
+    const code = await startServer(port);
+    if (code !== UPDATE_RESTART_EXIT) process.exit(code);
+
+    // The panel handed an update to the detached updater and exited: wait for
+    // the swap, then start the new version in the foreground.
+    console.log("Update installed; waiting for the new files to be swapped in...");
+    const status = await waitForUpdate();
+    if (!status) {
+      console.error("The updater did not report back in time. Check update.log in the SMP data folder.");
+      process.exit(1);
+    }
+    if (!status.ok) {
+      console.error(`Update failed: ${status.error || "unknown error"}. Check update.log in the SMP data folder.`);
+      process.exit(1);
+    }
+    try { rmSync(UPDATE_STATUS_FILE, { force: true }); } catch {}
+
+    console.log("Restarting the panel with the updated version...");
+    await waitForPort(port);
   }
-
-  // Fail early with a clear message instead of serving "Panel build missing".
-  if (!existsSync(path.join(serverDir, "src", "public", "index.html"))) {
-    console.error("Panel build missing. Run `bun run build`, or start without SMP_SKIP_BUILD=1.");
-    process.exit(1);
-  }
-
-  console.log("Starting server...");
-  const env = { ...process.env, SMP_PORT: String(port), PORT: String(port) };
-  const server = spawn(bunCommand(), ["run", "src/index.js"], { cwd: serverDir, stdio: "inherit", detached: false, env });
-  server.on("exit", (code) => process.exit(code ?? 0));
-  process.on("SIGINT", () => { try { server.kill("SIGTERM"); } catch {} process.exit(0); });
-  process.on("SIGTERM", () => { try { server.kill("SIGTERM"); } catch {} process.exit(0); });
-
-  await new Promise(() => {});
 })();
