@@ -1,14 +1,12 @@
 <script>
   import { onMount, onDestroy } from "svelte";
-  import { api } from "../../stores.js";
+  import { subscribe as subscribeStream } from "../../serverStream.js";
   import Panel from "../ui/Panel.svelte";
   import UsageChart from "./UsageChart.svelte";
 
   let { serverId } = $props();
 
   const MAX_POINTS = 60;
-  const POLL_MS = 1000;
-  const OFFLINE_POLL_MS = 5000;
 
   let cpuHistory = $state([]);
   let ramHistory = $state([]);
@@ -17,9 +15,8 @@
   let memoryMaxBytes = $state(0);
   let isOnline = $state(false);
   let error = $state("");
-  let timer = null;
   let destroyed = false;
-  let inFlight = false;
+  let streamSub = null;
 
   function formatBytes(bytes) {
     const n = Number(bytes) || 0;
@@ -29,53 +26,26 @@
     return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
   }
 
-  async function poll() {
-    if (destroyed || inFlight) return;
-    // A hidden tab must not keep sampling: the chart is not visible and the
-    // server-side work (a process query per sample) is pure waste.
-    if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
-    inFlight = true;
-    try {
-      const s = await api(`/servers/${serverId}/stats`, { retries: 0, timeout: 6000 });
-      if (destroyed) return;
-      isOnline = !!s.online;
-      error = s.error || "";
-      cpuPercent = Number(s.cpuPercent) || 0;
-      memoryBytes = Number(s.memoryBytes) || 0;
-      memoryMaxBytes = Number(s.memoryMaxBytes) || 0;
-      const cpu = isOnline && !error ? cpuPercent : 0;
-      const ram = isOnline && !error ? memoryBytes : 0;
-      cpuHistory = [...cpuHistory, cpu].slice(-MAX_POINTS);
-      ramHistory = [...ramHistory, ram].slice(-MAX_POINTS);
-    } catch {
-      if (!destroyed) error = "Reconnecting…";
-    } finally {
-      inFlight = false;
-    }
-  }
-
-  async function loop() {
-    await poll();
+  function onStats(s) {
     if (destroyed) return;
-    timer = setTimeout(loop, isOnline ? POLL_MS : OFFLINE_POLL_MS);
-  }
-
-  function onVisible() {
-    if (typeof document === "undefined" || document.visibilityState !== "visible") return;
-    // Catch up immediately instead of waiting for the next tick.
-    if (timer) { clearTimeout(timer); timer = null; }
-    loop();
+    isOnline = !!s.online;
+    error = s.error || "";
+    cpuPercent = Number(s.cpuPercent) || 0;
+    memoryBytes = Number(s.memoryBytes) || 0;
+    memoryMaxBytes = Number(s.memoryMaxBytes) || 0;
+    const cpu = isOnline && !error ? cpuPercent : 0;
+    const ram = isOnline && !error ? memoryBytes : 0;
+    cpuHistory = [...cpuHistory, cpu].slice(-MAX_POINTS);
+    ramHistory = [...ramHistory, ram].slice(-MAX_POINTS);
   }
 
   onMount(() => {
-    loop();
-    document?.addEventListener?.("visibilitychange", onVisible);
+    streamSub = subscribeStream(serverId, { stats: true }, { onStats });
   });
 
   onDestroy(() => {
     destroyed = true;
-    if (timer) clearTimeout(timer);
-    document?.removeEventListener?.("visibilitychange", onVisible);
+    if (streamSub) { streamSub.unsubscribe(); streamSub = null; }
   });
 
   const cpuMax = $derived(Math.max(100, ...cpuHistory));

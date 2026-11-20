@@ -1,8 +1,9 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join, dirname } from "path";
 import { queryOne, run } from "../core/db.js";
-import { DATA_DIR, JAVA_DIR, serverPath, serverFilesDir, serverBackupsDir, serverEulaPath, isValidServerId } from "../core/config.js";
-import { parseMemoryMb, formatMemoryMb, clampMemoryMb, normalizeJvmArgs, parseExec } from "../core/util.js";
+import { JAVA_DIR, serverPath, serverFilesDir, serverBackupsDir, serverEulaPath, isValidServerId } from "../core/config.js";
+import { DATA_DIR } from "../core/paths.js";
+import { parseMemoryMb, formatMemoryMb, clampMemoryMb, normalizeJvmArgs, parseExec, parseJsonField } from "../core/util.js";
 import { getLoader, loaderIds } from "../loaders/index.js";
 import { portProfile, allocateServerPorts, saveServerPorts, applyPortsToConfig, PortConflictError } from "../runtime/ports.js";
 import { defaultJavaId, detectJava } from "../runtime/java.js";
@@ -159,24 +160,91 @@ function getProp(id, key, def) {
   } catch (e) { return def; }
 }
 
+/** Per-file write locks to prevent TOCTOU races in server.properties. */
+const propWriteLocks = new Map(); // path -> Promise resolver chain
+
+function withPropLock(filePath, fn) {
+  let lock = propWriteLocks.get(filePath);
+  if (!lock) {
+    let resolve;
+    lock = new Promise(r => { resolve = r; });
+    propWriteLocks.set(filePath, lock);
+  }
+  const prev = lock;
+  return prev.then(async () => {
+    try {
+      return await fn();
+    } finally {
+      // Create the next link in the chain
+      let resolve;
+      const next = new Promise(r => { resolve = r; });
+      propWriteLocks.set(filePath, next);
+      resolve();
+    }
+  });
+}
+
 function setProp(id, key, value) {
   const p = serverPropPath(id);
   const actualKey = key === "motd" && isEndstoneServer(id) ? "server-name" : key;
-  let txt = existsSync(p) ? readFileSync(p, "utf8") : "";
-  const lines = txt.split(/\r?\n/).filter((l, i, a) => !(i === a.length - 1 && l === ""));
-  const idx = lines.findIndex(l => l.startsWith(actualKey + "="));
-  if (idx >= 0) lines[idx] = `${actualKey}=${value}`;
-  else lines.push(`${actualKey}=${value}`);
-  mkdirSync(dirname(p), { recursive: true });
-  writeFileSync(p, lines.join("\n") + "\n");
+  return withPropLock(p, () => {
+    let txt = existsSync(p) ? readFileSync(p, "utf8") : "";
+    const lines = txt.split(/\r?\n/).filter((l, i, a) => !(i === a.length - 1 && l === ""));
+    const idx = lines.findIndex(l => l.startsWith(actualKey + "="));
+    if (idx >= 0) lines[idx] = `${actualKey}=${value}`;
+    else lines.push(`${actualKey}=${value}`);
+    mkdirSync(dirname(p), { recursive: true });
+    writeFileSync(p, lines.join("\n") + "\n");
+  });
 }
 
 function setServerPid(id, pid) {
   try { run("UPDATE servers SET pid = ?, online = ? WHERE id = ?", pid ?? null, pid ? 1 : 0, id); } catch {}
 }
-function getServerRow(id) {
+/**
+ * LRU cache for getServerRow() with multi-user invalidation safety.
+ *
+ * Multiple users can modify a server simultaneously. The cache is invalidated
+ * whenever a server is modified (PATCH /:id), ensuring no stale reads.
+ * Cache size is bounded to prevent memory leaks with many servers.
+ */
+const serverRowCache = new Map();
+const SERVER_ROW_CACHE_MAX = 64;
+const SERVER_ROW_TTL_MS = 3000; // 3s TTL — server state changes frequently
+
+function cacheGetServerRow(id) {
+  const hit = serverRowCache.get(id);
+  if (!hit) return null;
+  if (Date.now() - hit.at > SERVER_ROW_TTL_MS) {
+    serverRowCache.delete(id);
+    return null;
+  }
+  return hit.row;
+}
+
+function cacheSetServerRow(id, row) {
+  if (serverRowCache.size >= SERVER_ROW_CACHE_MAX && !serverRowCache.has(id)) {
+    const oldest = serverRowCache.keys().next().value;
+    if (oldest !== undefined) serverRowCache.delete(oldest);
+  }
+  serverRowCache.set(id, { row, at: Date.now() });
+}
+
+/** Drops one or all cached server rows. Call after any server mutation. */
+export function invalidateServerRowCache(id = null) {
+  if (id === null) serverRowCache.clear();
+  else serverRowCache.delete(id);
+}
+
+function getServerRow(id, skipCache) {
   if (!isValidServerId(id)) return null;
-  return queryOne("SELECT * FROM servers WHERE id = ?", id);
+  if (!skipCache) {
+    const cached = cacheGetServerRow(id);
+    if (cached) return cached;
+  }
+  const row = queryOne("SELECT id, name, dir, loader, loader_version, loader_build, loader_channel, java_version, jar, memory_min, memory_max, motd, port, online, auto_start, pid, jvm_args, backup_limit, backup_on_stop, backup_on_update, backup_on_loader, backup_auto_prune, exec, created_at FROM servers WHERE id = ?", id);
+  if (row) cacheSetServerRow(id, row);
+  return row;
 }
 
 async function createServerRecord(body = {}) {

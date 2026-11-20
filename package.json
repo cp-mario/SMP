@@ -3,6 +3,7 @@
   "version": "0.0.41",
   "type": "module",
   "description": "Minecraft server panel",
+  "workspaces": ["server", "web"],
   "scripts": {
     "dev": "bun run dev.js",
     "start": "bun run start.js",
@@ -13,7 +14,8 @@
     "bump:patch": "bun run scripts/version.js bump",
     "server": "bun --cwd=server run dev",
     "check": "bun --cwd=web run check",
-    "test": "bun --cwd=web run test"
+    "test": "bun test ./server/tests",
+    "test:web": "bun --cwd=web run test"
   },
   "engines": {
     "bun": ">=1.4.4"

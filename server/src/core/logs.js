@@ -1,21 +1,10 @@
 import { existsSync, statSync, renameSync, appendFileSync, readFileSync, writeFileSync } from "fs";
 import { serverLogPath } from "./config.js";
+import { getLogState, setLogState, clearLogState, getAllLogIds, LOG_LINES_MAX } from "./logStore.js";
+import { LOG_FLUSH_MS, LOG_MAX_BYTES, LOG_EVENT_FLUSH_MS } from "./constants.js";
 
 export const logStreams = new Map(); // id -> Set<ReadableStreamDefaultController>
 
-const LOG_FLUSH_MS = 250;
-const LOG_MAX_BYTES = 10 * 1024 * 1024;
-// SSE events are coalesced per animation frame: a burst of log lines becomes
-// one `data:` event instead of one per line.
-const LOG_EVENT_FLUSH_MS = 32;
-
-function getLogState(id) {
-  const arr = globalThis.__smp_logs || (globalThis.__smp_logs = new Map());
-  let st = arr.get(id);
-  if (!st) { st = { lines: [], next: 0, loaded: false, pending: [], flushTimer: null }; arr.set(id, st); }
-  if (!st.pending) st.pending = [];
-  return st;
-}
 function flushLogs(id) {
   const st = getLogState(id);
   if (st.flushTimer) { clearTimeout(st.flushTimer); st.flushTimer = null; }
@@ -31,9 +20,7 @@ function flushLogs(id) {
   } catch {}
 }
 function flushAllLogs() {
-  const arr = globalThis.__smp_logs;
-  if (!arr) return;
-  for (const id of arr.keys()) { try { flushLogs(id); } catch {} }
+  for (const id of getAllLogIds()) { try { flushLogs(id); } catch {} }
 }
 function loadLogsFromDisk(id) {
   const st = getLogState(id);
@@ -44,7 +31,7 @@ function loadLogsFromDisk(id) {
     if (existsSync(logPath)) {
       const txt = readFileSync(logPath, "utf8");
       const lines = txt.split(/\r?\n/).filter(l => l.trim());
-      const start = Math.max(0, lines.length - 4000);
+      const start = Math.max(0, lines.length - LOG_LINES_MAX);
       st.lines = lines.slice(start).map((t, i) => ({ n: start + i, t }));
       st.next = start + st.lines.length;
     }
@@ -52,10 +39,7 @@ function loadLogsFromDisk(id) {
   return st;
 }
 function clearLogs(id) {
-  const arr = globalThis.__smp_logs || (globalThis.__smp_logs = new Map());
-  const old = arr.get(id);
-  if (old?.flushTimer) clearTimeout(old.flushTimer);
-  arr.set(id, { lines: [], next: 0, loaded: true, pending: [], flushTimer: null });
+  clearLogState(id);
   try { writeFileSync(serverLogPath(id), ""); } catch {}
   const pending = logPending.get(id);
   if (pending?.timer) clearTimeout(pending.timer);
@@ -83,6 +67,22 @@ function pushLogEvent(id, payload) {
   const set = logStreams.get(id);
   if (!set || !set.size) return;
   const msg = `data: ${JSON.stringify(payload)}\n\n`;
+  let bytes;
+  const enc = logEncoder();
+  for (const c of [...set]) {
+    try { c.enqueue(bytes || (bytes = enc.encode(msg))); } catch { set.delete(c); }
+  }
+}
+
+/**
+ * Push a typed SSE event (e.g. `event: stats`) to all listeners of a server.
+ * Unlike plain `data:` messages, typed events use the `event:` field so the
+ * client can distinguish stats from log lines on the same EventSource.
+ */
+function pushTypedEvent(id, eventType, payload) {
+  const set = logStreams.get(id);
+  if (!set || !set.size) return;
+  const msg = `event: ${eventType}\ndata: ${JSON.stringify(payload)}\n\n`;
   let bytes;
   const enc = logEncoder();
   for (const c of [...set]) {
@@ -121,7 +121,7 @@ function logLine(id, text) {
   if (raw === "") return;
   const entry = { n: st.next++, t: `[${new Date().toISOString()}] ${raw}` };
   st.lines.push(entry);
-  if (st.lines.length > 4000) st.lines.splice(0, st.lines.length - 4000);
+  if (st.lines.length > LOG_LINES_MAX) st.lines.splice(0, st.lines.length - LOG_LINES_MAX);
   st.pending.push(entry.t);
   if (st.pending.length >= 500) flushLogs(id);
   else if (!st.flushTimer) st.flushTimer = setTimeout(() => { st.flushTimer = null; flushLogs(id); }, LOG_FLUSH_MS);
@@ -148,4 +148,4 @@ function getLogs(id, after, limit) {
   return { lines: list, next: st.next, full: true };
 }
 
-export { getLogState, flushLogs, flushAllLogs, loadLogsFromDisk, clearLogs, logEncoder, pushLogEvent, flushLogEvents, queueLogLines, logLine, getLogs };
+export { getLogState, flushLogs, flushAllLogs, loadLogsFromDisk, clearLogs, logEncoder, pushLogEvent, pushTypedEvent, flushLogEvents, queueLogLines, logLine, getLogs };

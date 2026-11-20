@@ -4,7 +4,7 @@ import { db, query, run, setSetting, deleteSetting, deleteSettingsLike, getSetti
 import { isValidServerId, serverPath, serverFilesDir, hasServerIcon, serverIconVersion } from "../core/config.js";
 import { rmdirRecursive, formatMemoryMb, clampMemoryMb, parseMemoryMb, normalizeJvmArgs, parseExec, flagValue } from "../core/util.js";
 import { jsonResponse } from "../core/http.js";
-import { getServerRow, setServerPid, createServerRecord, modFromRow, setProp } from "../instances/servers.js";
+import { getServerRow, setServerPid, createServerRecord, modFromRow, setProp, invalidateServerRowCache } from "../instances/servers.js";
 import { isRunning, runningServers } from "../instances/process.js";
 import { createBackupRecord, enforceBackupLimit } from "../instances/backupOps.js";
 import { getServerUpdateInfo, getModpackUpdateInfo, modpackMeta, getModpackRow } from "../instances/updates.js";
@@ -17,10 +17,10 @@ export const serversRoute = new Elysia({ prefix: "/api/servers" })
   .get("/", async ({ request, query: queryParams }) => {
     // One snapshot for the whole list: per-server lookups would run two
     // queries each (loader ports + plugin ports) plus one reservation scan.
-    const rows = query("SELECT * FROM servers ORDER BY name ASC");
+    const rows = query("SELECT id, name, dir, loader, loader_version, loader_build, loader_channel, java_version, jar, memory_min, memory_max, motd, port, online, auto_start, pid, jvm_args, backup_limit, backup_on_stop, backup_on_update, backup_on_loader, backup_auto_prune, exec, created_at FROM servers ORDER BY name ASC");
     const sharedPorts = usedPorts();
     const modsByServer = new Map();
-    for (const m of query("SELECT * FROM mods")) {
+    for (const m of query("SELECT id, server_id, source, project_id, version_id, version, filename, enabled, download_url, project_title, slug, icon_url, game_versions, loaders, sha1, sha256, sha512, file_size, channel, date_published, changelog, dependencies, store_url, meta, project_type, installed_at, updated_at FROM mods")) {
       if (!modsByServer.has(m.server_id)) modsByServer.set(m.server_id, []);
       modsByServer.get(m.server_id).push(modFromRow(m));
     }
@@ -53,7 +53,7 @@ export const serversRoute = new Elysia({ prefix: "/api/servers" })
   .get("/:id", async ({ request, params, query: queryParams }) => {
     const row = getServerRow(params.id);
     if (!row) return new Response("Not found", { status: 404 });
-    const mods = query("SELECT * FROM mods WHERE server_id = ?", row.id).map(modFromRow);
+    const mods = query("SELECT id, server_id, source, project_id, version_id, version, filename, enabled, download_url, project_title, slug, icon_url, game_versions, loaders, sha1, sha256, sha512, file_size, channel, date_published, changelog, dependencies, store_url, meta, project_type, installed_at, updated_at FROM mods WHERE server_id = ?", row.id).map(modFromRow);
     const online = isRunning(row.id);
     if (!online && row.pid) setServerPid(row.id, null);
     const lm = (getLoader(row.loader) || { meta: () => ({}) }).meta?.() || {};
@@ -262,7 +262,7 @@ export const serversRoute = new Elysia({ prefix: "/api/servers" })
       // `usedPorts` caches the server name join for conflict labels.
       if (body.name !== undefined) invalidatePortCache();
     }
-    if (body.motd !== undefined) setProp(params.id, "motd", body.motd);
+    if (body.motd !== undefined) await setProp(params.id, "motd", body.motd);
     if (allocatedPorts) {
       saveServerPorts(params.id, allocatedPorts);
       applyPortsToConfig({ dir: serverFilesDir(params.id), loaderId: effectiveLoader, ports: allocatedPorts });
@@ -272,5 +272,7 @@ export const serversRoute = new Elysia({ prefix: "/api/servers" })
       // automatic cleanup. Otherwise the UI offers a manual "delete over limit".
       if (getServerRow(params.id)?.backup_auto_prune) enforceBackupLimit(params.id);
     }
+    // Invalidate the cached server row so the next read sees the new values.
+    invalidateServerRowCache(params.id);
     return { ok: true };
   });

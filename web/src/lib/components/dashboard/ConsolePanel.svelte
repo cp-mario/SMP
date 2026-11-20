@@ -3,6 +3,7 @@
   import { api } from "../../stores.js";
   import { ansiToHtml } from "../../ansi.js";
   import { classifyLogLevel } from "../../logLevel.js";
+  import { subscribe as subscribeStream, loadInitialLogs, destroyChannel } from "../../serverStream.js";
   import Button from "../ui/Button.svelte";
   import IconButton from "../ui/IconButton.svelte";
   import Icon from "../ui/Icon.svelte";
@@ -14,9 +15,7 @@
   let el = $state(null);
   let inputEl = $state(null);
   let next = 0;
-  let es = null;
-  let pollTimer = null;
-  let reconnectTimer = null;
+  let streamSub = null;
   let destroyed = false;
   let cmdError = $state("");
   let autoScroll = $state(true);
@@ -77,7 +76,7 @@
 
   async function loadFull() {
     try {
-      const res = await api(`/servers/${serverId}/logs?limit=${INITIAL_LINES}`, { retries: 0, timeout: 8000 });
+      const res = await loadInitialLogs(serverId, INITIAL_LINES);
       if (destroyed) return;
       const list = Array.isArray(res.lines) ? res.lines : (res.logs ? String(res.logs).split("\n").filter(Boolean) : []);
       setLines(list.slice(-INITIAL_LINES));
@@ -88,52 +87,12 @@
     } catch { /* offline is fine */ }
   }
 
-  function stopPolling() {
-    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
-  }
-
-  function closeStream() {
-    try { es?.close(); } catch { /* noop */ }
-    es = null;
-  }
-
-  function startPolling() {
-    if (pollTimer || destroyed) return;
-    // Fallback only (the SSE stream is the normal path): a slow tick keeps the
-    // panel cheap when no output is arriving.
-    const tick = async () => {
-      if (destroyed) return;
-      // A hidden tab does not need live output.
-      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
-      try {
-        const res = await api(`/servers/${serverId}/logs?after=${next}`, { retries: 0, timeout: 8000 });
-        if (Array.isArray(res.lines) && res.lines.length) append(res.lines);
-        if (Number.isFinite(res.next)) next = res.next;
-      } catch { /* transient */ }
-    };
-    pollTimer = setInterval(tick, 2000);
-  }
-
-  function scheduleReconnect() {
-    if (reconnectTimer || destroyed) return;
-    reconnectTimer = setTimeout(() => {
-      reconnectTimer = null;
-      if (!destroyed) startStream();
-    }, 5000);
-  }
-
   function startStream() {
     if (destroyed) return;
-    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
-    closeStream();
-    stopPolling();
-    if (typeof EventSource === "undefined") { startPolling(); return; }
+    stopStream();
     const after = next;
-    try {
-      es = new EventSource(`/api/servers/${serverId}/logs/stream?after=${after}`);
-      es.onmessage = (e) => {
-        let d;
-        try { d = JSON.parse(e.data); } catch { return; }
+    streamSub = subscribeStream(serverId, { logs: true }, {
+      onLog: (d) => {
         if (d.clear) {
           lines = [];
           next = d.next || 0;
@@ -145,10 +104,8 @@
         if (Array.isArray(d.init)) {
           if (d.init.length) {
             if (after > 0) {
-              // Backlog missed while (re)connecting: add it to what we already show.
               append(d.init);
             } else {
-              // First load (or loadFull failed): replace with the last N lines.
               setLines(d.init.slice(-INITIAL_LINES));
               cleared = false;
               atBottom = true;
@@ -157,7 +114,6 @@
           }
           next = Number.isFinite(d.next) ? d.next : next;
         } else if (Array.isArray(d.lines)) {
-          // Batched event: one payload carrying several lines.
           append(d.lines);
           if (Number.isFinite(d.next)) next = d.next;
         } else if (d.line != null) {
@@ -165,23 +121,17 @@
           if (Number.isFinite(d.n)) next = d.n + 1;
           else if (Number.isFinite(d.next)) next = d.next;
         }
-      };
-      es.onerror = () => {
-        closeStream();
-        startPolling();
-        scheduleReconnect();
-      };
-    } catch {
-      startPolling();
-      scheduleReconnect();
-    }
+      },
+    });
+  }
+
+  function stopStream() {
+    if (streamSub) { streamSub.unsubscribe(); streamSub = null; }
   }
 
   onDestroy(() => {
     destroyed = true;
-    closeStream();
-    stopPolling();
-    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+    stopStream();
     if (copyTimer) clearTimeout(copyTimer);
   });
 
@@ -189,9 +139,7 @@
 
   function resetConsole() {
     loadToken++;
-    closeStream();
-    stopPolling();
-    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+    stopStream();
     lines = [];
     next = 0;
     cleared = false;
@@ -202,9 +150,7 @@
 
   async function startConsole() {
     const token = ++loadToken;
-    closeStream();
-    stopPolling();
-    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+    stopStream();
     lines = [];
     next = 0;
     cleared = false;

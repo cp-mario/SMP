@@ -599,10 +599,6 @@
       <Icon name="settings" size={18} />
       <span>Settings</span>
     </button>
-    <button type="button" onclick={() => (showModpack = true)}>
-      <Icon name="package" size={18} />
-      <span>Pack</span>
-    </button>
     <button type="button" class="mobile-new" onclick={() => (showCreate = true)}>
       <Icon name="plus" size={18} />
       <span>New</span>

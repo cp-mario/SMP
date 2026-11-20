@@ -1,9 +1,7 @@
 import { Database } from "bun:sqlite";
 import path from "path";
 import { mkdirSync } from "fs";
-import { homedir } from "os";
-
-const DATA_DIR = process.env.SMP_DATA_DIR || path.join(homedir(), ".smp");
+import { DATA_DIR } from "./paths.js";
 mkdirSync(DATA_DIR, { recursive: true });
 
 let _db = null;
@@ -29,7 +27,7 @@ function openDb() {
   if (_db) return _db;
   _db = new Database(path.join(DATA_DIR, "smp.sqlite"));
   try { _db.exec(PRAGMAS); } catch {}
-  initDb(_db);
+  initDbSync(_db);
   return _db;
 }
 
@@ -75,132 +73,92 @@ function clearStatements() {
   stmtCache.clear();
 }
 
-const SCHEMA_VERSION = 6;
-
 // Initialize immediately to avoid Proxy issues with Bun's Database
 const db = openDb();
 
 export { db, query, queryOne, run, stmt };
 
-export function initDb(conn = db) {
+/**
+ * Create the base tables (idempotent) and run any pending migrations.
+ * The base tables are created first so migrations have a schema to work on.
+ * Synchronous version used at module load time.
+ */
+export function initDbSync(conn = db) {
+  _createBaseTables(conn);
+  _createIndexes(conn);
+}
+
+/**
+ * Async version of initDb that also runs versioned migrations.
+ */
+export async function initDb(conn = db) {
+  _createBaseTables(conn);
+  try {
+    const { runMigrations } = await import("./migrations.js");
+    runMigrations(conn);
+  } catch {
+    // migrations.js may not exist on very old installs; fall through gracefully
+  }
+  _createIndexes(conn);
+}
+
+function _createBaseTables(conn) {
   conn.exec(`
     CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS servers (
       id TEXT PRIMARY KEY, name TEXT NOT NULL, dir TEXT NOT NULL,
       loader TEXT NOT NULL DEFAULT 'vanilla', loader_version TEXT, loader_build TEXT NOT NULL DEFAULT '', java_version TEXT,
+      loader_channel TEXT NOT NULL DEFAULT '',
       jar TEXT NOT NULL DEFAULT 'server.jar', memory_min TEXT DEFAULT '512M', memory_max TEXT DEFAULT '2G',
       motd TEXT DEFAULT 'A SMP Server', port INTEGER DEFAULT 25565,
       online INTEGER DEFAULT 0, auto_start INTEGER DEFAULT 0, pid INTEGER,
+      jvm_args TEXT NOT NULL DEFAULT '',
+      backup_limit INTEGER NOT NULL DEFAULT 0, backup_on_stop INTEGER NOT NULL DEFAULT 0,
+      backup_on_update INTEGER NOT NULL DEFAULT 1, backup_on_loader INTEGER NOT NULL DEFAULT 1,
+      backup_auto_prune INTEGER NOT NULL DEFAULT 0,
+      exec TEXT,
       created_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
     );
     CREATE TABLE IF NOT EXISTS mods (
       id TEXT PRIMARY KEY, server_id TEXT NOT NULL, source TEXT NOT NULL,
       project_id TEXT, version_id TEXT, version TEXT, filename TEXT,
       enabled INTEGER DEFAULT 1, download_url TEXT,
-      installed_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+      project_title TEXT, slug TEXT, icon_url TEXT,
+      game_versions TEXT, loaders TEXT,
+      sha1 TEXT, sha256 TEXT, sha512 TEXT,
+      file_size INTEGER, channel TEXT, date_published INTEGER,
+      changelog TEXT, dependencies TEXT, store_url TEXT, meta TEXT,
+      project_type TEXT,
+      installed_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+      updated_at INTEGER,
+      FOREIGN KEY (server_id) REFERENCES servers(id) ON DELETE CASCADE
     );
     CREATE TABLE IF NOT EXISTS modpacks (
       id TEXT PRIMARY KEY, server_id TEXT NOT NULL, source TEXT NOT NULL,
       project_id TEXT, version_id TEXT, version TEXT, title TEXT,
       icon_url TEXT, store_url TEXT, loader TEXT, loader_version TEXT,
-      loader_build TEXT, created_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+      loader_build TEXT,
+      created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+      FOREIGN KEY (server_id) REFERENCES servers(id) ON DELETE CASCADE
     );
     CREATE TABLE IF NOT EXISTS backups (
       id TEXT PRIMARY KEY, server_id TEXT NOT NULL, path TEXT NOT NULL,
-      size INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+      size INTEGER NOT NULL DEFAULT 0, error TEXT, name TEXT, number INTEGER,
+      protected INTEGER NOT NULL DEFAULT 0, format TEXT NOT NULL DEFAULT 'zip',
+      reason TEXT,
+      created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+      FOREIGN KEY (server_id) REFERENCES servers(id) ON DELETE CASCADE
     );
     CREATE TABLE IF NOT EXISTS schedules (
       id TEXT PRIMARY KEY, server_id TEXT NOT NULL, cron TEXT NOT NULL,
       command TEXT NOT NULL, enabled INTEGER DEFAULT 1,
-      created_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+      created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+      FOREIGN KEY (server_id) REFERENCES servers(id) ON DELETE CASCADE
     );
   `);
-  try { conn.prepare("ALTER TABLE mods ADD COLUMN download_url TEXT").run(); } catch {}
-  try { conn.prepare("ALTER TABLE servers ADD COLUMN pid INTEGER").run(); } catch {}
-  try { conn.prepare("ALTER TABLE servers ADD COLUMN jvm_args TEXT NOT NULL DEFAULT ''").run(); } catch {}
-  try { conn.prepare("ALTER TABLE servers ADD COLUMN loader_channel TEXT NOT NULL DEFAULT ''").run(); } catch {}
-  try { conn.prepare("ALTER TABLE servers ADD COLUMN loader_build TEXT NOT NULL DEFAULT ''").run(); } catch {}
-  try { conn.prepare("ALTER TABLE backups ADD COLUMN error TEXT").run(); } catch {}
-  try { conn.prepare("ALTER TABLE backups ADD COLUMN name TEXT").run(); } catch {}
-  try { conn.prepare("ALTER TABLE backups ADD COLUMN number INTEGER").run(); } catch {}
-  try { conn.prepare("ALTER TABLE backups ADD COLUMN protected INTEGER NOT NULL DEFAULT 0").run(); } catch {}
-  try { conn.prepare("ALTER TABLE backups ADD COLUMN format TEXT NOT NULL DEFAULT 'zip'").run(); } catch {}
-  try { conn.prepare("ALTER TABLE backups ADD COLUMN reason TEXT").run(); } catch {}
-  try { conn.prepare("ALTER TABLE servers ADD COLUMN backup_limit INTEGER NOT NULL DEFAULT 0").run(); } catch {}
-  try { conn.prepare("ALTER TABLE servers ADD COLUMN backup_on_stop INTEGER NOT NULL DEFAULT 0").run(); } catch {}
-  try { conn.prepare("ALTER TABLE servers ADD COLUMN backup_on_update INTEGER NOT NULL DEFAULT 1").run(); } catch {}
-  try { conn.prepare("ALTER TABLE servers ADD COLUMN backup_on_loader INTEGER NOT NULL DEFAULT 1").run(); } catch {}
-  try { conn.prepare("ALTER TABLE servers ADD COLUMN backup_auto_prune INTEGER NOT NULL DEFAULT 0").run(); } catch {}
-  try { conn.prepare("ALTER TABLE servers ADD COLUMN exec TEXT").run(); } catch {}
-  try { conn.prepare("ALTER TABLE mods ADD COLUMN project_title TEXT").run(); } catch {}
-  try { conn.prepare("ALTER TABLE mods ADD COLUMN slug TEXT").run(); } catch {}
-  try { conn.prepare("ALTER TABLE mods ADD COLUMN icon_url TEXT").run(); } catch {}
-  try { conn.prepare("ALTER TABLE mods ADD COLUMN game_versions TEXT").run(); } catch {}
-  try { conn.prepare("ALTER TABLE mods ADD COLUMN loaders TEXT").run(); } catch {}
-  try { conn.prepare("ALTER TABLE mods ADD COLUMN sha1 TEXT").run(); } catch {}
-  try { conn.prepare("ALTER TABLE mods ADD COLUMN sha256 TEXT").run(); } catch {}
-  try { conn.prepare("ALTER TABLE mods ADD COLUMN sha512 TEXT").run(); } catch {}
-  try { conn.prepare("ALTER TABLE mods ADD COLUMN file_size INTEGER").run(); } catch {}
-  try { conn.prepare("ALTER TABLE mods ADD COLUMN channel TEXT").run(); } catch {}
-  try { conn.prepare("ALTER TABLE mods ADD COLUMN date_published INTEGER").run(); } catch {}
-  try { conn.prepare("ALTER TABLE mods ADD COLUMN changelog TEXT").run(); } catch {}
-  try { conn.prepare("ALTER TABLE mods ADD COLUMN dependencies TEXT").run(); } catch {}
-  try { conn.prepare("ALTER TABLE mods ADD COLUMN store_url TEXT").run(); } catch {}
-  try { conn.prepare("ALTER TABLE mods ADD COLUMN meta TEXT").run(); } catch {}
-  try { conn.prepare("ALTER TABLE mods ADD COLUMN project_type TEXT").run(); } catch {}
-  try { conn.prepare("ALTER TABLE mods ADD COLUMN updated_at INTEGER").run(); } catch {}
+}
 
-  // ---- Backup metadata migration (v4) ----
-  // Older rows had no name/number/format. Assign stable numbers and default
-  // names once; files ending in .tar.zst are marked as the new format.
-  try {
-    conn.exec("UPDATE backups SET format = 'tar.zst' WHERE lower(path) LIKE '%.tar.zst'");
-    const pending = conn.prepare("SELECT id, server_id FROM backups WHERE number IS NULL ORDER BY server_id ASC, created_at ASC").all();
-    if (pending.length) {
-      const counters = new Map();
-      for (const row of conn.prepare("SELECT server_id, MAX(number) AS max FROM backups WHERE number IS NOT NULL GROUP BY server_id").all()) {
-        counters.set(row.server_id, Number(row.max) || 0);
-      }
-      const update = conn.prepare("UPDATE backups SET number = ?, name = COALESCE(NULLIF(name, ''), ?) WHERE id = ?");
-      for (const row of pending) {
-        const next = (counters.get(row.server_id) || 0) + 1;
-        counters.set(row.server_id, next);
-        update.run(next, `Backup #${next}`, row.id);
-      }
-    }
-  } catch { /* migration is best-effort */ }
-
-  // ---- Schema migration ----
-  // Drop tables and indexes that are no longer part of the schema. They were
-  // introduced by older panel versions and are unreferenced now; removing them
-  // reclaims their pages and stops the planner from considering stale stats.
-  let currentVersion = 0;
-  try { currentVersion = Number(conn.prepare("PRAGMA user_version").get()?.user_version) || 0; } catch {}
-  if (currentVersion < SCHEMA_VERSION) {
-    for (const legacy of ["schedule_runs", "server_stats"]) {
-      try { conn.exec(`DROP TABLE IF EXISTS ${legacy}`); } catch {}
-    }
-    // Drop indexes that are redundant (the primary key already covers the
-    // leftmost column) or superseded by the composite indexes created below.
-    try {
-      conn.exec(`
-        DROP INDEX IF EXISTS idx_mods_server;
-        DROP INDEX IF EXISTS idx_mods_source;
-        DROP INDEX IF EXISTS idx_mods_enabled;
-        DROP INDEX IF EXISTS idx_modpacks_server;
-        DROP INDEX IF EXISTS idx_modpacks_source;
-        DROP INDEX IF EXISTS idx_backups_server_created;
-        DROP INDEX IF EXISTS idx_schedules_server_enabled;
-      `);
-    } catch {}
-    // Reclaim the space the dropped tables/rows used to occupy.
-    try { conn.exec("VACUUM"); } catch {}
-    // Refresh planner statistics for the new indexes.
-    try { conn.exec("ANALYZE"); } catch {}
-  }
-
-  try { conn.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`); } catch {}
-
+function _createIndexes(conn) {
   // Indexes for the hot query paths. Composite indexes let the common
   // "filter by server_id, newest first" reads run as a single index scan
   // without a temp b-tree sort.

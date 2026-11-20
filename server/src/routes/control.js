@@ -5,7 +5,8 @@ import { jsonResponse } from "../core/http.js";
 import { getServerRow, setServerPid, ensureServerDir, writeServerEula, readServerEula } from "../instances/servers.js";
 import { runningServers, isRunning, startServerById, stopServerProcess, forceStopServerProcess, readProcessUsage, procUsageSamples } from "../instances/process.js";
 import { createBackupRecord } from "../instances/backupOps.js";
-import { logLine, getLogs, clearLogs, logStreams, logEncoder } from "../core/logs.js";
+import { logLine, getLogs, clearLogs, logStreams, logEncoder, pushTypedEvent } from "../core/logs.js";
+import { addListener, removeListener } from "../core/serverStats.js";
 
 // ============ CONTROL ============
 /**
@@ -17,7 +18,7 @@ import { logLine, getLogs, clearLogs, logStreams, logEncoder } from "../core/log
  */
 export const statsRoute = new Elysia({ prefix: "/api/stats" })
   .get("/", async ({ request }) => {
-    const rows = query("SELECT * FROM servers ORDER BY name ASC");
+    const rows = query("SELECT id, memory_max FROM servers ORDER BY name ASC");
     const now = Date.now();
     const out = [];
     for (const row of rows) {
@@ -107,7 +108,11 @@ export const controlRoute = new Elysia({ prefix: "/api/servers" })
       await stopServerProcess(params.id);
       await new Promise(r2 => setTimeout(r2, 800));
     }
-    const res = await startServerById(params.id, row);
+    // Re-read the row after stop so any config changes made while stopping
+    // (e.g. memory, JAR, loader) are picked up by the new start.
+    const freshRow = getServerRow(params.id, true);
+    if (!freshRow) return new Response(JSON.stringify({ ok: false, error: "Not found" }), { status: 404, headers: { "Content-Type": "application/json" } });
+    const res = await startServerById(params.id, freshRow);
     if (res instanceof Response) return res;
     return res;
   })
@@ -185,11 +190,15 @@ export const controlRoute = new Elysia({ prefix: "/api/servers" })
           try { c.enqueue(logEncoder().encode(`: ping\n\n`)); } catch { try { clearInterval(hb); } catch {} }
         }, 15000);
         c._hb = hb;
+        // Start pushing stats events over the same SSE connection.
+        addListener(id);
       },
       cancel() {
         try { clearInterval(ctrl?._hb); } catch {}
         const set = logStreams.get(id);
         if (set) { set.delete(ctrl); if (!set.size) logStreams.delete(id); }
+        // Stop pushing stats when the last listener disconnects.
+        removeListener(id);
       }
     });
     return new Response(stream, { headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive" } });

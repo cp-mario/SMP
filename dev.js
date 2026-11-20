@@ -1,10 +1,10 @@
 // SMP dev.js - Starts the API (3001) and the Vite dev server with HMR (5173).
 // `bun run dev` keeps hot reload; `bun run start` serves the built app without it.
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { bunCommand } from "./scripts/bun-bin.js";
+import { installDependencies, depsChanged, needsUnshare, unshareHardlinks, writeUnshareMarker, usesProotLink2Symlink } from "./scripts/deps.js";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const serverDir = path.join(root, "server");
@@ -15,14 +15,30 @@ const skipInstall = process.env.SMP_SKIP_INSTALL === "1";
 const bun = bunCommand();
 
 async function ensureDependencies(dir, label) {
-  if (skipInstall || existsSync(path.join(dir, "node_modules"))) return;
-  console.log(`Installing ${label} dependencies...`);
-  const code = await new Promise((resolve) => {
-    const child = spawn(bun, ["install"], { cwd: dir, stdio: "inherit" });
-    child.on("exit", (c) => resolve(c ?? 0));
-    child.on("error", (e) => { console.error(`[${label}-install] ${e?.message || e}`); resolve(1); });
-  });
-  if (code !== 0) { console.error(`Could not install ${label} dependencies.`); process.exit(code); }
+  if (skipInstall) return;
+  const nodeModules = path.join(dir, "node_modules");
+
+  if (!depsChanged(dir)) return;
+
+  try {
+    await installDependencies(dir, label);
+  } catch (error) {
+    console.warn(`Could not install ${label} dependencies with the frozen lockfile (${error?.message || error}); retrying without it...`);
+    try {
+      await installDependencies(dir, label, { frozen: false });
+    } catch (retryError) {
+      console.error(`Could not install ${label} dependencies: ${retryError?.message || retryError}`);
+      process.exit(1);
+    }
+  }
+
+  const link2symlink = usesProotLink2Symlink();
+  if (link2symlink && needsUnshare(dir)) {
+    console.log(`Preparing ${label} dependencies for this environment...`);
+    const fixed = unshareHardlinks(nodeModules);
+    writeUnshareMarker(dir);
+    console.log(fixed ? ` done (${fixed} file${fixed === 1 ? "" : "s"}).` : " done.");
+  }
 }
 
 const children = [];

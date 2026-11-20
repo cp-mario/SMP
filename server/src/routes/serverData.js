@@ -1,7 +1,7 @@
 import { Elysia } from "elysia";
 import { db } from "../core/db.js";
 import { serverFilesDir } from "../core/config.js";
-import { getServerRow, serverDataFromRow, setProp } from "../instances/servers.js";
+import { getServerRow, serverDataFromRow, setProp, invalidateServerRowCache } from "../instances/servers.js";
 import { isRunning } from "../instances/process.js";
 import { allocateServerPorts, saveServerPorts, applyPortsToConfig, invalidatePortCache, PortConflictError } from "../runtime/ports.js";
 
@@ -89,12 +89,13 @@ export const serverDataRoute = new Elysia({ prefix: "/api/servers/:id/data" })
     if (data.name !== undefined) invalidatePortCache();
 
     // Keep the on-disk properties in sync for the two fields the panel mirrors.
-    if (data.motd !== undefined) setProp(params.id, "motd", data.motd);
+    if (data.motd !== undefined) await setProp(params.id, "motd", data.motd);
     if (allocatedPorts) {
       saveServerPorts(params.id, allocatedPorts);
       applyPortsToConfig({ dir: serverFilesDir(params.id), loaderId: nextLoader, ports: allocatedPorts });
     }
 
+    invalidateServerRowCache(params.id);
     return { ok: true, row: { ...getServerRow(params.id) } };
   })
   .post("/", async ({ params, body, set }) => {
@@ -139,10 +140,11 @@ export const serverDataRoute = new Elysia({ prefix: "/api/servers/:id/data" })
       else { set.status = 400; return { ok: false, error: "exec must be an object or null" }; }
     }
     if (fields.length) { vals.push(params.id); db.prepare(`UPDATE servers SET ${fields.join(", ")} WHERE id = ?`).run(...vals); if (data.name !== undefined) invalidatePortCache(); }
-    if (data.motd !== undefined) setProp(params.id, "motd", data.motd);
+    if (data.motd !== undefined) await setProp(params.id, "motd", data.motd);
     if (allocatedPorts) {
       saveServerPorts(params.id, allocatedPorts);
       applyPortsToConfig({ dir: serverFilesDir(params.id), loaderId: nextLoader, ports: allocatedPorts });
     }
+    invalidateServerRowCache(params.id);
     return { ok: true };
   });

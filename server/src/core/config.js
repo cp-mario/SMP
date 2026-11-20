@@ -1,15 +1,14 @@
 import { readdirSync, statSync, existsSync, writeFileSync, mkdirSync, unlinkSync, rmdirSync, rmSync, renameSync } from "fs";
 import { join, dirname, resolve } from "path";
 import { fileURLToPath } from "url";
-import { homedir } from "os";
 import { getSetting } from "./db.js";
 import { migrateServerPorts } from "../runtime/ports.js";
+import { DATA_DIR } from "./paths.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const ROOT_DIR = resolve(__dirname, "../../..");
 
-const DATA_DIR = process.env.SMP_DATA_DIR || join(homedir(), ".smp");
 const SERVERS_DIR = join(DATA_DIR, "servers");
 const JAVA_DIR = join(DATA_DIR, "java");
 mkdirSync(SERVERS_DIR, { recursive: true });
