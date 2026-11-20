@@ -4,6 +4,7 @@ import { existsSync, statSync } from "fs";
 import { join, resolve } from "path";
 import { OUTPUT_DIR, MIME, IMMUTABLE_CACHE, ASSET_CACHE, corsAllowedOrigins } from "./core/config.js";
 import { compressResponse, fileResponse } from "./core/http.js";
+import { rateLimit } from "./core/ratelimit.js";
 import { handleServerFiles, handleServerUpload } from "./instances/files.js";
 import { appVersion } from "./core/version.js";
 import { UPDATE_PAGE_HTML } from "./core/updatePage.js";
@@ -25,6 +26,10 @@ import { updatesRoute } from "./routes/updates.js";
 import { panelRoute } from "./routes/panel.js";
 
 const app = new Elysia()
+  // Reject abusive request rates per IP before any routing work happens. The
+  // budget is generous enough for a normal multi-tab panel session but caps a
+  // runaway loop or flood (hundreds of req/s) within the first second.
+  .onRequest(({ request, server }) => rateLimit(request, server))
   .use(cors({
     // Reflect only configured origins. Returning `true` for any origin would let
     // every website call the panel with the user's credentials.
