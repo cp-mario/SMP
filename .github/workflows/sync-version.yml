@@ -4,11 +4,17 @@ name: Sync version
 # without the "pre-release" checkbox) becomes the new version base: this writes
 # its tag into the root package.json.
 #
+# GitHub creates the release tag at the current default-branch HEAD, which still
+# carries the *pre-release* version. This workflow bumps package.json in a new
+# commit and then moves the tag onto that commit, so both the branch and the
+# release source archive show the released version.
+#
 # Pre-releases are skipped: they are created by the Pre-release workflow, which
 # has already written that same version into package.json.
 #
 #   0.1.3 (pre-release)          -> skipped, package.json already says 0.1.3
-#   publish 1.0.0 manually       -> package.json becomes 1.0.0
+#   publish 1.0.0 manually       -> package.json becomes 1.0.0, tag v1.0.0
+#                                   moves to the commit that carries 1.0.0
 #   next push                    -> pre-release 1.0.1, 1.0.2, ...
 
 on:
@@ -67,11 +73,27 @@ jobs:
 
       - name: Commit and push the synced version
         if: steps.sync.outputs.changed == 'true'
+        env:
+          VERSION: ${{ steps.sync.outputs.version }}
+          TAG: ${{ github.event.release.tag_name }}
         run: |
           set -euo pipefail
-          VERSION="${{ steps.sync.outputs.version }}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add package.json
           git commit -m "chore(release): sync package.json to v${VERSION} [skip ci]"
           git push origin "HEAD:${BRANCH}"
+          # Move the release tag onto the sync commit: GitHub created it at the
+          # old HEAD (pre-release version), so without this the release source
+          # archive would ship the previous version while the branch is correct.
+          git tag -f "$TAG" >/dev/null
+          for attempt in 1 2 3 4 5; do
+            if git push --force origin "refs/tags/${TAG}"; then
+              echo "Tag $TAG now points at the synced commit."
+              exit 0
+            fi
+            echo "Force-pushing ${TAG} failed (attempt ${attempt}); retrying in $((attempt * 10))s..." >&2
+            sleep $((attempt * 10))
+          done
+          echo "Could not move ${TAG} after 5 attempts." >&2
+          exit 1
