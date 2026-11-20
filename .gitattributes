@@ -1,0 +1,10 @@
+# Keep development-only files out of the GitHub source archives used by
+# install.sh, install.ps1 and the panel self-updater. Development still uses
+# the full repository; only `git archive` (and therefore the release tarballs)
+# honours export-ignore.
+.github/**       export-ignore
+.junie/**        export-ignore
+dev.js           export-ignore
+web/tests/**     export-ignore
+web/README.md    export-ignore
+web/scripts/**   export-ignore

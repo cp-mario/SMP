@@ -19,6 +19,10 @@ package/
 # Frontend build output (Vite outDir: server/src/public)
 server/src/public/
 
+# Launcher state (incremental build marker and lock)
+.smp-build.json
+.smp-build.lock/
+
 # SMP runtime data
 data/
 .smp/

@@ -453,6 +453,9 @@ import { homedir } from "os";
 const [, , pidArg, stageDir, installDir, entry] = process.argv;
 const pid = Number(pidArg);
 const port = Number(process.env.SMP_PORT || process.env.PORT || 3001);
+// The first launch after an update may install dependencies and build the web
+// panel, so allow a generous window before declaring the relaunch failed.
+const panelTimeoutMs = 300000;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const logPath = join(process.env.SMP_DATA_DIR || join(homedir(), ".smp"), "update.log");
 const log = (msg) => { try { appendFileSync(logPath, "[" + new Date().toISOString() + "] " + msg + "\\n"); } catch {} };
@@ -540,17 +543,17 @@ for (const name of readdirSync(tree)) {
 
 log("updater: files swapped" + (failing ? " (" + failing + " entries failed, see above)" : ""));
 
-rmSync(trash, { recursive: true, force: true });
-rmSync(stageDir, { recursive: true, force: true });
+try { rmSync(trash, { recursive: true, force: true }); } catch (e) { log("updater: could not remove trash: " + e.message); }
+try { rmSync(stageDir, { recursive: true, force: true }); } catch (e) { log("updater: could not remove stage: " + e.message); }
 log("updater: discarded " + stageBase);
 
 let child = relaunch();
-let up = child ? await waitPanel(150000, child) : false;
+let up = child ? await waitPanel(panelTimeoutMs, child) : false;
 if (!up && child && child.exitCode !== null) {
   log("updater: the launcher exited without starting the panel; launching it again");
   await sleep(1000);
   child = relaunch();
-  up = child ? await waitPanel(150000, child) : false;
+  up = child ? await waitPanel(panelTimeoutMs, child) : false;
 }
 log("updater: " + (up ? "panel relaunched (http://localhost:" + port + ")" : "relaunch FAILED"));
 if (!up) process.exit(1);
@@ -719,6 +722,14 @@ export async function applyUpdate({ target = "", current = "", channel = "stable
       const tree = join(stage, "tree");
       mkdirSync(tree, { recursive: true });
       for (const name of readdirSync(srcRoot)) renameSync(join(srcRoot, name), join(tree, name));
+
+      // Release archives already exclude development-only files through
+      // .gitattributes, but older archives (and local trees) may still carry
+      // them: keep the installation as small as a fresh install.
+      for (const rel of [".github", ".junie", "dev.js", "web/tests", "web/README.md", "web/scripts"]) {
+        try { rmSync(join(tree, rel), { recursive: true, force: true }); } catch { /* best effort */ }
+      }
+
       for (const rel of ["node_modules", "server/node_modules", "web/node_modules"]) {
         const old = join(ROOT_DIR, rel);
         const dst = join(tree, rel);

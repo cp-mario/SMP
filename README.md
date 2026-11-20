@@ -30,7 +30,7 @@ curl -fsSL https://raw.githubusercontent.com/cp-mario/SMP/main/install.sh | sh
 powershell -c "irm https://raw.githubusercontent.com/cp-mario/SMP/main/install.ps1|iex"
 ```
 
-The installer asks for the release channel (latest **stable** — recommended — or latest **experimental**), installs Bun with the official installer if missing, downloads the source of that release from GitHub and installs it into `/opt/smp` (Linux/macOS, needs `root` or `sudo`) or `%LOCALAPPDATA%\SMP` (Windows). It does not install dependencies or build the panel: that happens on the first launch. It prints the command to run.
+The installer asks for the release channel (latest **stable** — recommended — or latest **experimental**), installs Bun with the official installer if missing, downloads the source of that release from GitHub and installs it into `/opt/smp` (Linux/macOS, needs `root` or `sudo`) or `%LOCALAPPDATA%\SMP` (Windows). It then installs the `server/` and `web/` dependencies, builds the web panel into `server/src/public` and removes development-only files (tests, CI, dev launcher), so the first launch only starts the server. Set `SMP_INSTALL_DIR` to choose another directory and `SMP_CHANNEL=stable|experimental` to skip the channel prompt. It prints the command to run.
 
 ## Run
 
@@ -39,7 +39,7 @@ bun run /opt/smp/start.js                 # Linux / macOS
 bun run "%LOCALAPPDATA%\SMP\start.js"     # Windows
 ```
 
-The launcher installs the missing `server/` and `web/` dependencies, builds the web panel into `server/src/public`, checks the port (default `3001`, with the option to stop a previous instance or start on the next free port) and starts the API + panel at http://localhost:3001.
+The launcher installs the missing `server/` and `web/` dependencies, rebuilds the web panel only when its sources or lockfiles changed, checks the port (default `3001`, with the option to stop a previous instance or start on the next free port) and starts the API + panel at http://localhost:3001. A normal start does no dependency or build work: both are skipped when their state markers match. Set `SMP_FORCE_BUILD=1` to force a rebuild.
 
 ## Update
 
@@ -65,14 +65,14 @@ bun run dev
 
 Open http://localhost:5173: the Vite dev server (rolldown) reloads the panel on every change and proxies `/api` to `http://localhost:3001`.
 
-`bun run start` builds the panel once and serves it from the Bun API at http://localhost:3001, without hot reload.
+`bun run start` builds the panel when needed (first run, after an update or after a web edit) and serves it from the Bun API at http://localhost:3001, without hot reload.
 
 Root scripts (run from the repository root, after installing `server/` and `web/`):
 
 | Script | Description |
 | --- | --- |
 | `bun run dev` | `dev.js`: start the API and the Vite dev server with hot reload |
-| `bun run start` | `start.js`: install, build and launch the panel (no hot reload) |
+| `bun run start` | `start.js`: install missing deps, rebuild only when the web app changed, and launch (no hot reload) |
 | `bun run build` | Build the web panel into `server/src/public` |
 | `bun run build:web` | Same as `build` |
 | `bun run build:server` | Compile the API into `server/dist/smp` |
@@ -81,7 +81,7 @@ Root scripts (run from the repository root, after installing `server/` and `web/
 | `bun run version` | Print the current version |
 | `bun run bump:patch` | Bump the patch version in `package.json` |
 
-`bun run build` needs the `web/` dependencies; `start.js` builds only when `web/node_modules` is present.
+`bun run build` needs the `web/` dependencies. `start.js` reuses the previous build when the web sources, configuration and lockfile are unchanged, so it only invokes Vite after an update or an edit.
 
 ## Configuration (environment variables)
 
@@ -92,6 +92,8 @@ Root scripts (run from the repository root, after installing `server/` and `web/
 | `SMP_REPO` | `cp-mario/SMP` | GitHub repo used for updates |
 | `SMP_SKIP_INSTALL` | `0` | Skip dependency install on launch (`1`) |
 | `SMP_SKIP_BUILD` | `0` | Skip web build on launch (`1`) |
+| `SMP_FORCE_BUILD` | `0` | Rebuild the web panel even when its inputs did not change (`1`) |
+| `SMP_INSTALL_DIR` | platform default | Installation directory used by `install.sh` / `install.ps1` |
 | `SMP_BACKUP_ZSTD_LEVEL` | `3` | Backup zstd level (1–19) |
 | `SMP_SFTP_PORT` | `2222` | SFTP listening port |
 | `SMP_SFTP_AUTO` | `0` | Start SFTP at boot even if no server has it enabled (`1`) |
@@ -104,9 +106,9 @@ The data directory contains `smp.sqlite` (servers, settings, mods, backups, sche
 
 ```
 install.sh / install.ps1   one-shot installers (GitHub release -> /opt/smp or %LOCALAPPDATA%\SMP)
-start.js                   launcher (port check, deps, build, run)
+start.js                   launcher (port check, deps, incremental build, run)
 dev.js                     dev launcher (API + Vite dev server with hot reload)
-scripts/                   bun executable lookup and version helper (bump/set/get)
+scripts/                   bun executable lookup, dependency/build state, installer and version helper
 server/                    Elysia API (Bun): loaders, mods, backups, files, SFTP, Java, self-update
 web/                       Svelte 5 + Vite web panel (see web/README.md)
 .github/workflows/         pre-release + version sync automation

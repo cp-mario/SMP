@@ -1,11 +1,13 @@
-// SMP start.js - Starts the Bun server (API + static panel) and opens the browser
+// SMP start.js - Starts the Bun server (API + static panel)
 import { spawn, execSync } from "child_process";
-import { existsSync, readdirSync, lstatSync, copyFileSync, renameSync, rmSync } from "fs";
+import { existsSync } from "fs";
 import path from "path";
 import net from "net";
 import { fileURLToPath } from "url";
 import readline from "readline";
 import { bunCommand } from "./scripts/bun-bin.js";
+import { ensureWebBuild } from "./scripts/build-web.js";
+import { installDependencies, depsChanged, needsUnshare, unshareHardlinks, writeUnshareMarker, usesProotLink2Symlink } from "./scripts/deps.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -14,78 +16,37 @@ const serverDir = path.join(root, "server");
 const webDir = path.join(root, "web");
 const DEFAULT_PORT = Number(process.env.SMP_PORT || 3001);
 
-function run(cmd, args, cwd, label) {
-  return new Promise((resolve) => {
-    const child = spawn(cmd, args, { cwd, stdio: "inherit", shell: false });
-    child.on("exit", (code) => {
-      if (code !== 0 && code !== null) console.error(`[${label}] exited with code ${code}`);
-      resolve(code ?? 0);
-    });
-    child.on("error", (e) => {
-      console.error(`[${label}] failed to spawn: ${e?.message || e}`);
-      resolve(1);
-    });
-  });
-}
-
-// Termux/PRoot (proot-distro) cannot create real hardlinks, so it emulates them
-// with symlinks into a hidden store. The kernel still hands the store path back
-// through /proc, so Bun resolves an installed file to something like
-// /.l2s/.l2s.bin.js0003.0002 and then fails to load its relative imports.
-// Installing with the copy backend and de-sharing existing hardlinks keeps
-// module resolution intact inside those guests.
-function usesProotLink2Symlink() {
-  if (process.platform !== "linux") return false;
-  return existsSync(process.env.PROOT_L2S_DIR || "/.l2s");
-}
-
-function installArgs() {
-  return usesProotLink2Symlink() ? ["install", "--backend=copyfile"] : ["install"];
-}
-
-function unshareHardlinks(dir) {
-  let fixed = 0;
-  const pending = [dir];
-  while (pending.length) {
-    const current = pending.pop();
-    let entries;
-    try { entries = readdirSync(current); } catch { continue; }
-    for (const name of entries) {
-      const target = path.join(current, name);
-      let st;
-      try { st = lstatSync(target); } catch { continue; }
-      // Real symlinks (package bin shims) are fine and must be left alone;
-      // link2symlink entries are masked as regular files with nlink > 1.
-      if (st.isSymbolicLink()) continue;
-      if (st.isDirectory()) { pending.push(target); continue; }
-      if (!st.isFile() || st.nlink <= 1) continue;
-      const tmp = `${target}.smp-unshare-${process.pid}`;
-      try {
-        copyFileSync(target, tmp);
-        try { renameSync(tmp, target); }
-        catch { rmSync(target, { force: true }); renameSync(tmp, target); }
-        fixed++;
-      } catch {
-        try { rmSync(tmp, { force: true }); } catch {}
-      }
-    }
-  }
-  return fixed;
-}
-
 async function ensureDependencies(dir, label) {
   const nodeModules = path.join(dir, "node_modules");
   const link2symlink = usesProotLink2Symlink();
   const skipInstall = process.env.SMP_SKIP_INSTALL === "1";
-  const needsInstall = existsSync(nodeModules) ? link2symlink : !skipInstall;
-  if (needsInstall) {
-    console.log(`Installing ${label} dependencies...`);
-    const code = await run(bunCommand(), installArgs(), dir, `${label}-install`);
-    if (code !== 0) { console.error(`Could not install ${label} dependencies.`); process.exit(code); }
+
+  if (skipInstall) {
+    if (!existsSync(nodeModules)) {
+      console.warn(`[${label}] SMP_SKIP_INSTALL=1 and node_modules is missing; the panel may fail to start.`);
+    }
+  } else if (!existsSync(nodeModules) || depsChanged(dir)) {
+    try {
+      await installDependencies(dir, label);
+    } catch (error) {
+      // A frozen install fails when a release shipped an out-of-sync lockfile;
+      // retry without it instead of leaving the panel unable to start.
+      console.warn(`Could not install ${label} dependencies with the frozen lockfile (${error?.message || error}); retrying without it...`);
+      try {
+        await installDependencies(dir, label, { frozen: false });
+      } catch (retryError) {
+        console.error(`Could not install ${label} dependencies: ${retryError?.message || retryError}`);
+        process.exit(1);
+      }
+    }
   }
-  if (link2symlink && existsSync(nodeModules)) {
-    process.stdout.write(`Preparing ${label} dependencies for this environment...`);
+
+  // Link2symlink hardlinks are fixed once per dependency state, not on every
+  // launch: walking all of node_modules is slow on proot guests.
+  if (link2symlink && needsUnshare(dir)) {
+    console.log(`Preparing ${label} dependencies for this environment...`);
     const fixed = unshareHardlinks(nodeModules);
+    writeUnshareMarker(dir);
     console.log(fixed ? ` done (${fixed} file${fixed === 1 ? "" : "s"}).` : " done.");
   }
 }
@@ -184,17 +145,22 @@ async function askChoice(port, probe) {
   await ensureDependencies(serverDir, "server");
   await ensureDependencies(webDir, "web");
 
-  if (process.env.SMP_SKIP_BUILD !== "1") {
-    console.log("Building web app...");
-    // Build with the plain Vite CLI (rolldown) through Bun, no Node involved.
-    const viteBin = path.join(webDir, "node_modules", "vite", "bin", "vite.js");
-    const buildCode = await run(bunCommand(), [viteBin, "build"], webDir, "web-build");
-    if (buildCode !== 0) { console.error("Web build failed; aborting."); process.exit(buildCode); }
-  } else {
+  if (process.env.SMP_SKIP_BUILD === "1") {
     console.log("Skipping web build (SMP_SKIP_BUILD=1).");
+  } else {
+    const build = await ensureWebBuild({ root, webDir, force: process.env.SMP_FORCE_BUILD === "1" });
+    if (!build.ok) {
+      console.error(build.error || "Web build failed; aborting.");
+      process.exit(1);
+    }
   }
 
-  const url = `http://localhost:${port}`;
+  // Fail early with a clear message instead of serving "Panel build missing".
+  if (!existsSync(path.join(serverDir, "src", "public", "index.html"))) {
+    console.error("Panel build missing. Run `bun run build`, or start without SMP_SKIP_BUILD=1.");
+    process.exit(1);
+  }
+
   console.log("Starting server...");
   const env = { ...process.env, SMP_PORT: String(port), PORT: String(port) };
   const server = spawn(bunCommand(), ["run", "src/index.js"], { cwd: serverDir, stdio: "inherit", detached: false, env });
