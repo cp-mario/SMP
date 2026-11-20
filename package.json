@@ -1,6 +1,6 @@
 {
   "name": "smp-main",
-  "version": "0.0.33",
+  "version": "0.0.34",
   "type": "module",
   "description": "Minecraft server panel",
   "scripts": {
