@@ -1,11 +1,11 @@
 import { Elysia } from "elysia";
-import { db } from "../core/db.js";
+import { query } from "../core/db.js";
 import { serverPortsStatus, portProfile, isPortNumber, findPortOwner, isPortBindable, allocateServerPorts } from "../runtime/ports.js";
 
 // ============ PORTS ============
 export const portsRoute = new Elysia({ prefix: "/api/ports" })
   .get("/", () => {
-    const rows = db.prepare("SELECT * FROM servers ORDER BY name ASC").all();
+    const rows = query("SELECT * FROM servers ORDER BY name ASC");
     return {
       servers: rows.map((r) => ({
         id: r.id, name: r.name, loader: r.loader,

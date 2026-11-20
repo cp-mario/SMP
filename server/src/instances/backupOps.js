@@ -1,6 +1,6 @@
 import { existsSync, statSync, mkdirSync, unlinkSync, rmdirSync, renameSync } from "fs";
 import { join } from "path";
-import { db, getSetting, setSetting } from "../core/db.js";
+import { query, queryOne, run, getSetting, setSetting } from "../core/db.js";
 import { serverBackupsDir, serverFilesDir } from "../core/config.js";
 import { logLine } from "../core/logs.js";
 import { getServerRow } from "./servers.js";
@@ -80,7 +80,7 @@ function backupLimitFor(server) {
 function peekBackupNumber(serverId) {
   let max = Number(getSetting(`backup_seq_${serverId}`, "0")) || 0;
   try {
-    const row = db.prepare("SELECT MAX(number) AS max FROM backups WHERE server_id = ?").get(serverId);
+    const row = queryOne("SELECT MAX(number) AS max FROM backups WHERE server_id = ?", serverId);
     max = Math.max(max, Number(row?.max) || 0);
   } catch {}
   return max + 1;
@@ -94,7 +94,7 @@ function allocateBackupNumber(serverId) {
 
 function unprotectedBackups(serverId) {
   try {
-    return db.prepare("SELECT * FROM backups WHERE server_id = ? AND protected = 0 ORDER BY created_at ASC, number ASC").all(serverId);
+    return query("SELECT * FROM backups WHERE server_id = ? AND protected = 0 ORDER BY created_at ASC, number ASC", serverId);
   } catch {
     return [];
   }
@@ -124,7 +124,7 @@ function deleteBackupRecord(row, { force = false } = {}) {
       throw err;
     }
   }
-  db.prepare("DELETE FROM backups WHERE id = ? AND server_id = ?").run(row.id, row.server_id);
+  run("DELETE FROM backups WHERE id = ? AND server_id = ?", row.id, row.server_id);
   return true;
 }
 
@@ -152,8 +152,8 @@ async function createBackupRecord(serverId, { name = "", protect = false, reason
     const cleanName = normalizeBackupName(name) || `Backup #${number}`;
     const protectedFlag = protect ? 1 : 0;
     try {
-      db.prepare("INSERT INTO backups(id,server_id,path,size,name,number,protected,format,reason) VALUES(?,?,?,?,?,?,?,?,?)")
-        .run(id, serverId, path, size, cleanName, number, protectedFlag, BACKUP_FORMAT, String(reason || "manual"));
+      run("INSERT INTO backups(id,server_id,path,size,name,number,protected,format,reason) VALUES(?,?,?,?,?,?,?,?,?)",
+        id, serverId, path, size, cleanName, number, protectedFlag, BACKUP_FORMAT, String(reason || "manual"));
     } catch (e) {
       discardArchive();
       throw e;
@@ -161,7 +161,7 @@ async function createBackupRecord(serverId, { name = "", protect = false, reason
     if (getServerRow(serverId)?.backup_auto_prune) {
       enforceBackupLimit(serverId, { keepId: id });
     }
-    const created = db.prepare("SELECT * FROM backups WHERE id = ?").get(id);
+    const created = queryOne("SELECT * FROM backups WHERE id = ?", id);
     logLine(serverId, `[backup] Created ${cleanName} (${formatBytes(size)})`);
     return backupJson(created);
   });
@@ -202,13 +202,13 @@ async function ensureStoredTarZst(serverId, row) {
     await convertZipToTarZst(row.path, nextPath, tempRoot);
   }
   const size = statSync(nextPath).size;
-  db.prepare("UPDATE backups SET path = ?, size = ?, format = ? WHERE id = ? AND server_id = ?")
-    .run(nextPath, size, BACKUP_FORMAT, row.id, serverId);
+  run("UPDATE backups SET path = ?, size = ?, format = ? WHERE id = ? AND server_id = ?",
+    nextPath, size, BACKUP_FORMAT, row.id, serverId);
   if (row.path !== nextPath) {
     try { unlinkSync(row.path); } catch {}
   }
   try { rmdirSync(tempRoot); } catch {}
-  return db.prepare("SELECT * FROM backups WHERE id = ? AND server_id = ?").get(row.id, serverId);
+  return queryOne("SELECT * FROM backups WHERE id = ? AND server_id = ?", row.id, serverId);
 }
 
 export { normalizeBackupName, backupNumberLabel, backupName, backupFormat, backupReasonLabel, backupJson, backupDateStamp, backupDownloadName, withBackupLock, backupLimitFor, peekBackupNumber, allocateBackupNumber, unprotectedBackups, overLimitBackups, deleteBackupRecord, createBackupRecord, enforceBackupLimit, ensureStoredTarZst };

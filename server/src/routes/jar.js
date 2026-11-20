@@ -1,7 +1,7 @@
 import { Elysia } from "elysia";
 import { existsSync, mkdirSync } from "fs";
 import { join } from "path";
-import { db } from "../core/db.js";
+import { queryOne, run } from "../core/db.js";
 import { DATA_DIR, JAVA_DIR, isValidServerId } from "../core/config.js";
 import { jsonResponse } from "../core/http.js";
 import { ensureServerDir } from "../instances/servers.js";
@@ -14,7 +14,7 @@ export const jarRoute = new Elysia({ prefix: "/api/jar" })
   .get("/download", async ({ query }) => {
     const { loader, version, serverId, channel = "all", loaderVersion, loader_build, loaderBuild } = query;
     if (serverId && !isValidServerId(serverId)) return new Response("Server not found", { status: 404 });
-    const row = serverId ? db.prepare("SELECT * FROM servers WHERE id = ?").get(serverId) : null;
+    const row = serverId ? queryOne("SELECT * FROM servers WHERE id = ?", serverId) : null;
     const dir = serverId ? ensureServerDir(serverId) : join(DATA_DIR, "tmp");
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     if (!row && serverId) return new Response("Server not found", { status: 404 });
@@ -31,8 +31,8 @@ export const jarRoute = new Elysia({ prefix: "/api/jar" })
       const resolvedVersion = result.version || reqVer;
       const resolvedLoaderBuild = String(result.loaderVersion ?? reqLoaderBuild ?? "").trim();
       if (serverId) {
-        db.prepare("UPDATE servers SET jar = ?, loader_version = ?, loader_channel = ?, loader_build = ? WHERE id = ?").run(fileName, resolvedVersion, result.channel || channel || "", resolvedLoaderBuild, serverId);
-        if (result.exec !== undefined) db.prepare("UPDATE servers SET exec = ? WHERE id = ?").run(result.exec ? JSON.stringify(result.exec) : null, serverId);
+        run("UPDATE servers SET jar = ?, loader_version = ?, loader_channel = ?, loader_build = ? WHERE id = ?", fileName, resolvedVersion, result.channel || channel || "", resolvedLoaderBuild, serverId);
+        if (result.exec !== undefined) run("UPDATE servers SET exec = ? WHERE id = ?", result.exec ? JSON.stringify(result.exec) : null, serverId);
         try { __updateCache.delete(loaderId); } catch {}
         for (const k of __buildCache.keys()) if (k.startsWith(`${loaderId}:`)) __buildCache.delete(k);
         invalidateLoaderCache(loaderId);

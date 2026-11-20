@@ -1,4 +1,4 @@
-import { db } from "../core/db.js";
+import { query } from "../core/db.js";
 import { runningServers } from "./process.js";
 import { logLine } from "../core/logs.js";
 
@@ -50,7 +50,7 @@ function matchesCron(cron, date) {
 async function runSchedules() {
   const now = new Date();
   let schedules = [];
-  try { schedules = db.prepare("SELECT * FROM schedules WHERE enabled = 1").all(); } catch { return; }
+  try { schedules = query("SELECT * FROM schedules WHERE enabled = 1"); } catch { return; }
 
   for (const sched of schedules) {
     const cron = parseCron(sched.cron);

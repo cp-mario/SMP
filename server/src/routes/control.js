@@ -1,5 +1,5 @@
 import { Elysia } from "elysia";
-import { db } from "../core/db.js";
+import { query } from "../core/db.js";
 import { parseMemoryMb } from "../core/util.js";
 import { jsonResponse } from "../core/http.js";
 import { getServerRow, setServerPid, ensureServerDir, writeServerEula, readServerEula } from "../instances/servers.js";
@@ -17,7 +17,7 @@ import { logLine, getLogs, clearLogs, logStreams, logEncoder } from "../core/log
  */
 export const statsRoute = new Elysia({ prefix: "/api/stats" })
   .get("/", async ({ request }) => {
-    const rows = db.prepare("SELECT * FROM servers ORDER BY name ASC").all();
+    const rows = query("SELECT * FROM servers ORDER BY name ASC");
     const now = Date.now();
     const out = [];
     for (const row of rows) {

@@ -7,7 +7,7 @@ import {
 } from "fs";
 import { join, resolve, dirname, posix, sep } from "path";
 import { homedir } from "os";
-import { db, getSetting, setSetting } from "../core/db.js";
+import { queryOne, getSetting, setSetting } from "../core/db.js";
 
 const { Server } = ssh2;
 // ssh2 v1 SFTP constants live under utils.sftp / protocol in some builds; use numeric fallbacks.
@@ -127,7 +127,7 @@ export function startSftpServer(port = Number(process.env.SMP_SFTP_PORT || 2222)
         let id = null;
         // Usernames are exactly `smp-<first 8 chars of the server uuid>`.
         if (/^smp-[0-9a-f]{8}$/i.test(uname)) {
-          try { const row = db.prepare("SELECT id FROM servers WHERE id LIKE ?").get(uname.slice(4) + "%"); if (row) id = row.id; } catch {}
+          try { const row = queryOne("SELECT id FROM servers WHERE id LIKE ?", uname.slice(4) + "%"); if (row) id = row.id; } catch {}
         }
         if (!id || getSetting(sftpEnabledKey(id), "0") !== "1" || !verifyPassword(id, ctx.password)) {
           return ctx.reject(["password"]);
@@ -230,7 +230,7 @@ export function startSftpServer(port = Number(process.env.SMP_SFTP_PORT || 2222)
 
 export function autoStartSftp() {
   try {
-    const any = db.prepare("SELECT key FROM settings WHERE key LIKE 'sftp_enabled_%' AND value = '1' LIMIT 1").get();
+    const any = queryOne("SELECT key FROM settings WHERE key LIKE 'sftp_enabled_%' AND value = '1' LIMIT 1");
     if (any || process.env.SMP_SFTP_AUTO === "1") startSftpServer();
   } catch {}
 }

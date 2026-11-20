@@ -9,34 +9,49 @@ mkdirSync(DATA_DIR, { recursive: true });
 let _db = null;
 
 // WAL + NORMAL keeps writes durable across app crashes without an fsync per commit.
-const WRITE_PRAGMAS = `
+// mmap_size serves read pages from the OS page cache instead of copying them
+// through the pager; wal_autocheckpoint + journal_size_limit keep the -wal file
+// bounded so a long-running panel does not accumulate gigabytes of write-ahead
+// log. cache_size is negative (KiB): 16 MiB is ample for a panel-sized database.
+const PRAGMAS = `
   PRAGMA journal_mode = WAL;
   PRAGMA busy_timeout = 5000;
   PRAGMA foreign_keys = ON;
   PRAGMA synchronous = NORMAL;
   PRAGMA temp_store = MEMORY;
-  PRAGMA cache_size = -8000;
+  PRAGMA cache_size = -16000;
+  PRAGMA mmap_size = 268435456;
+  PRAGMA wal_autocheckpoint = 1000;
+  PRAGMA journal_size_limit = 67108864;
 `;
 
 function openDb() {
   if (_db) return _db;
   _db = new Database(path.join(DATA_DIR, "smp.sqlite"));
-  try { _db.exec(WRITE_PRAGMAS); } catch {}
+  try { _db.exec(PRAGMAS); } catch {}
   initDb(_db);
   return _db;
 }
 
 /**
- * Read-only statement helpers.
+ * Prepared-statement helpers.
  *
- * `db` is the single connection, so every read is synchronous and costs
- * microseconds. The statement handles are cached anyway: `prepare()` re-parses
- * the SQL, and the panel repeats a handful of queries on every 1-5 s poll.
+ * `db` is the single connection, so every statement is synchronous and costs
+ * microseconds. Handles are cached because `prepare()` re-parses the SQL and the
+ * panel repeats a handful of queries on every 1-5 s poll. The cache is bounded:
+ * dynamic `UPDATE ... SET ${fields}` builders stay on `db.prepare` so they can
+ * never grow the cache without limit.
  */
+const STMT_CACHE_MAX = 512;
 const stmtCache = new Map();
+
 function stmt(sql) {
   let prepared = stmtCache.get(sql);
-  if (!prepared) { prepared = db.prepare(sql); stmtCache.set(sql, prepared); }
+  if (!prepared) {
+    if (stmtCache.size >= STMT_CACHE_MAX) clearStatements();
+    prepared = db.prepare(sql);
+    stmtCache.set(sql, prepared);
+  }
   return prepared;
 }
 
@@ -50,17 +65,22 @@ function queryOne(sql, ...args) {
   return stmt(sql).get(...args);
 }
 
+/** Run a write statement (`INSERT`/`UPDATE`/`DELETE`) with a cached handle. */
+function run(sql, ...args) {
+  return stmt(sql).run(...args);
+}
+
 function clearStatements() {
   for (const prepared of stmtCache.values()) { try { prepared.finalize(); } catch {} }
   stmtCache.clear();
 }
 
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 
 // Initialize immediately to avoid Proxy issues with Bun's Database
 const db = openDb();
 
-export { db, query, queryOne };
+export { db, query, queryOne, run, stmt };
 
 export function initDb(conn = db) {
   conn.exec(`
@@ -150,14 +170,47 @@ export function initDb(conn = db) {
     }
   } catch { /* migration is best-effort */ }
 
+  // ---- Schema migration ----
+  // Drop tables and indexes that are no longer part of the schema. They were
+  // introduced by older panel versions and are unreferenced now; removing them
+  // reclaims their pages and stops the planner from considering stale stats.
+  let currentVersion = 0;
+  try { currentVersion = Number(conn.prepare("PRAGMA user_version").get()?.user_version) || 0; } catch {}
+  if (currentVersion < SCHEMA_VERSION) {
+    for (const legacy of ["schedule_runs", "server_stats"]) {
+      try { conn.exec(`DROP TABLE IF EXISTS ${legacy}`); } catch {}
+    }
+    // Drop indexes that are redundant (the primary key already covers the
+    // leftmost column) or superseded by the composite indexes created below.
+    try {
+      conn.exec(`
+        DROP INDEX IF EXISTS idx_mods_server;
+        DROP INDEX IF EXISTS idx_mods_source;
+        DROP INDEX IF EXISTS idx_mods_enabled;
+        DROP INDEX IF EXISTS idx_modpacks_server;
+        DROP INDEX IF EXISTS idx_modpacks_source;
+        DROP INDEX IF EXISTS idx_backups_server_created;
+        DROP INDEX IF EXISTS idx_schedules_server_enabled;
+      `);
+    } catch {}
+    // Reclaim the space the dropped tables/rows used to occupy.
+    try { conn.exec("VACUUM"); } catch {}
+    // Refresh planner statistics for the new indexes.
+    try { conn.exec("ANALYZE"); } catch {}
+  }
+
   try { conn.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`); } catch {}
 
-  // Indexes for the hot query paths (server list, mods/backup listing, schedule loop).
+  // Indexes for the hot query paths. Composite indexes let the common
+  // "filter by server_id, newest first" reads run as a single index scan
+  // without a temp b-tree sort.
   try { conn.exec("CREATE INDEX IF NOT EXISTS idx_servers_name ON servers(name)"); } catch {}
-  try { conn.exec("CREATE INDEX IF NOT EXISTS idx_mods_server ON mods(server_id)"); } catch {}
-  try { conn.exec("CREATE INDEX IF NOT EXISTS idx_backups_server_created ON backups(server_id, created_at DESC)"); } catch {}
+  try { conn.exec("CREATE INDEX IF NOT EXISTS idx_mods_server_installed ON mods(server_id, installed_at DESC)"); } catch {}
+  try { conn.exec("CREATE INDEX IF NOT EXISTS idx_modpacks_server_created ON modpacks(server_id, created_at DESC)"); } catch {}
+  try { conn.exec("CREATE INDEX IF NOT EXISTS idx_backups_server_created ON backups(server_id, created_at DESC, number DESC)"); } catch {}
+  try { conn.exec("CREATE INDEX IF NOT EXISTS idx_backups_server_unprotected ON backups(server_id, created_at ASC, number ASC) WHERE protected = 0"); } catch {}
   try { conn.exec("CREATE INDEX IF NOT EXISTS idx_schedules_enabled ON schedules(enabled)"); } catch {}
-  try { conn.exec("CREATE INDEX IF NOT EXISTS idx_modpacks_server ON modpacks(server_id)"); } catch {}
+  try { conn.exec("CREATE INDEX IF NOT EXISTS idx_schedules_server ON schedules(server_id)"); } catch {}
 }
 
 /**
@@ -181,8 +234,9 @@ export function resetDatabase() {
   // The pooled readers have no statements to reuse after the tables are gone.
   clearStatements();
   invalidateSettings();
-  // Reclaim the space the deleted rows used to occupy.
+  // Reclaim the space the deleted rows used to occupy and rebuild planner stats.
   try { db.exec("VACUUM"); } catch {}
+  try { db.exec("ANALYZE"); } catch {}
 }
 
 // ---------- Settings ----------
@@ -200,7 +254,7 @@ function loadSettingCache() {
   if (settingCacheLoaded) return;
   settingCacheLoaded = true;
   try {
-    for (const row of db.prepare("SELECT key, value FROM settings").all()) {
+    for (const row of query("SELECT key, value FROM settings")) {
       settingCache.set(row.key, row.value);
     }
   } catch { /* first boot: table is created by initDb */ }
@@ -209,7 +263,7 @@ function loadSettingCache() {
 export function getSetting(key, def) {
   if (!settingCacheLoaded) loadSettingCache();
   if (settingCache.has(key)) return settingCache.get(key);
-  const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key);
+  const row = queryOne("SELECT value FROM settings WHERE key = ?", key);
   if (!row) return def;
   if (settingCache.size >= SETTING_CACHE_MAX) settingCache.clear();
   settingCache.set(key, row.value);
@@ -217,13 +271,13 @@ export function getSetting(key, def) {
 }
 
 export function setSetting(key, value) {
-  db.prepare("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(key, value);
+  run("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", key, value);
   settingCache.set(key, value);
 }
 
 /** Removes one setting from the database and the cache. */
 export function deleteSetting(key) {
-  db.prepare("DELETE FROM settings WHERE key = ?").run(key);
+  run("DELETE FROM settings WHERE key = ?", key);
   settingCache.delete(key);
 }
 
@@ -233,7 +287,7 @@ export function deleteSetting(key) {
  * avoids emulating SQL LIKE.
  */
 export function deleteSettingsLike(pattern) {
-  const removed = db.prepare("DELETE FROM settings WHERE key LIKE ?").run(pattern);
+  const removed = run("DELETE FROM settings WHERE key LIKE ?", pattern);
   const text = String(pattern);
   const prefix = text.endsWith("%") ? text.slice(0, -1) : null;
   for (const key of [...settingCache.keys()]) {

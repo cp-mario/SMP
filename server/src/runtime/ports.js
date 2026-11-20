@@ -3,7 +3,7 @@ import dgram from "node:dgram";
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { db, query, queryOne } from "../core/db.js";
+import { db, query, queryOne, run } from "../core/db.js";
 
 /**
  * Port management for Minecraft servers.
@@ -92,7 +92,6 @@ export function migrateServerPorts() {
       PRIMARY KEY (server_id, role)
     );
     CREATE INDEX IF NOT EXISTS idx_server_ports_lookup ON server_ports(protocol, port);
-    CREATE INDEX IF NOT EXISTS idx_server_ports_server ON server_ports(server_id);
     CREATE TABLE IF NOT EXISTS server_extra_ports (
       id TEXT PRIMARY KEY,
       server_id TEXT NOT NULL,
@@ -104,6 +103,10 @@ export function migrateServerPorts() {
     CREATE INDEX IF NOT EXISTS idx_server_extra_ports_lookup ON server_extra_ports(protocol, port);
     CREATE INDEX IF NOT EXISTS idx_server_extra_ports_server ON server_extra_ports(server_id);
   `);
+  // `server_ports` is keyed by (server_id, role), so its implicit primary-key
+  // index already covers every "reservations for a server" lookup. The older
+  // standalone index on server_id is pure write overhead.
+  try { db.exec("DROP INDEX IF EXISTS idx_server_ports_server"); } catch {}
 
   // Reservations whose server row is gone are orphans (e.g. a server deleted by an
   // older panel version that only removed server_extra_ports). They would keep the
@@ -114,10 +117,11 @@ export function migrateServerPorts() {
   } catch { /* best-effort cleanup */ }
 
   const rows = db.prepare("SELECT id, loader, port FROM servers").all();
+  // One lookup instead of a COUNT(*) per server.
+  const seeded = new Set(db.prepare("SELECT DISTINCT server_id FROM server_ports").all().map((r) => r.server_id));
   const insert = db.prepare("INSERT INTO server_ports(server_id, role, port, protocol) VALUES(?,?,?,?)");
   for (const row of rows) {
-    const count = db.prepare("SELECT COUNT(*) AS c FROM server_ports WHERE server_id = ?").get(row.id);
-    if (Number(count?.c) > 0) continue;
+    if (seeded.has(row.id)) continue;
     const profile = portProfile(row.loader);
     const game = profile.find((p) => p.role === "game") || profile[0];
     const gamePort = isPortNumber(row.port) ? Number(row.port) : game.defaultPort;
@@ -129,6 +133,10 @@ export function migrateServerPorts() {
       const port = nextFreeFromDb(start, desc.protocol, used);
       if (port) insert.run(row.id, desc.role, port, desc.protocol);
     }
+    seeded.add(row.id);
+    // The memoized reservation snapshot must see the rows just inserted so the
+    // next server does not reuse a port this one took.
+    usedPortsCache = null;
   }
   // The migration may have just seeded rows, so cached port lists are stale.
   invalidatePortCache();
@@ -144,11 +152,24 @@ export function migrateServerPorts() {
  * here removes two queries per server per poll without staleness.
  */
 const portCache = new Map();
+const extraPortCache = new Map();
+// Memoized `protocol:port -> owner` snapshot shared by every caller. Any
+// reservation change invalidates it, so conflict checks stay correct.
+let usedPortsCache = null;
 
 function invalidatePortCache(serverId = null) {
-  if (serverId === null) portCache.clear();
-  else portCache.delete(serverId);
+  if (serverId === null) {
+    portCache.clear();
+    extraPortCache.clear();
+  } else {
+    portCache.delete(serverId);
+    extraPortCache.delete(serverId);
+  }
+  usedPortsCache = null;
 }
+
+/** Exposed so callers that rename a server can drop the memoized name join. */
+export { invalidatePortCache };
 
 export function getServerPorts(serverId) {
   const cached = portCache.get(serverId);
@@ -180,7 +201,9 @@ export function getServerPorts(serverId) {
 
 /** Extra ports reserved for plugins (Geyser, voice chat, Dynmap, ...). */
 export function getServerExtraPorts(serverId) {
-  return query(
+  const cached = extraPortCache.get(serverId);
+  if (cached) return cached.map((p) => ({ ...p }));
+  const list = query(
     "SELECT id, label, port, protocol FROM server_extra_ports WHERE server_id = ? ORDER BY rowid ASC",
     serverId,
   ).map((r) => ({
@@ -189,31 +212,40 @@ export function getServerExtraPorts(serverId) {
     port: Number(r.port),
     protocol: protocolOf(r.protocol),
   }));
+  extraPortCache.set(serverId, list);
+  return list.map((p) => ({ ...p }));
 }
 
 /** All reservations held by other servers, keyed by `protocol:port`. */
 /** All reservations held by other servers, keyed by `protocol:port`. */
 export function usedPorts(excludeServerId = null, into = null) {
   const map = into || new Map();
-  const rows = query(`
-    SELECT sp.server_id, sp.role, sp.port, sp.protocol, s.name AS server_name, NULL AS extra_id
-    FROM server_ports sp
-    LEFT JOIN servers s ON s.id = sp.server_id
-    UNION ALL
-    SELECT ep.server_id, ep.label AS role, ep.port, ep.protocol, s.name AS server_name, ep.id AS extra_id
-    FROM server_extra_ports ep
-    LEFT JOIN servers s ON s.id = ep.server_id
-  `);
-  for (const row of rows) {
-    if (excludeServerId && row.server_id === excludeServerId) continue;
-    map.set(portKey(row.protocol, row.port), {
-      serverId: row.server_id,
-      serverName: row.server_name,
-      role: row.role,
-      protocol: protocolOf(row.protocol),
-      port: Number(row.port),
-      extraId: row.extra_id || null,
-    });
+  if (usedPortsCache === null) {
+    const rows = query(`
+      SELECT sp.server_id, sp.role, sp.port, sp.protocol, s.name AS server_name, NULL AS extra_id
+      FROM server_ports sp
+      LEFT JOIN servers s ON s.id = sp.server_id
+      UNION ALL
+      SELECT ep.server_id, ep.label AS role, ep.port, ep.protocol, s.name AS server_name, ep.id AS extra_id
+      FROM server_extra_ports ep
+      LEFT JOIN servers s ON s.id = ep.server_id
+    `);
+    const snapshot = new Map();
+    for (const row of rows) {
+      snapshot.set(portKey(row.protocol, row.port), {
+        serverId: row.server_id,
+        serverName: row.server_name,
+        role: row.role,
+        protocol: protocolOf(row.protocol),
+        port: Number(row.port),
+        extraId: row.extra_id || null,
+      });
+    }
+    usedPortsCache = snapshot;
+  }
+  for (const [key, value] of usedPortsCache) {
+    if (excludeServerId && value.serverId === excludeServerId) continue;
+    map.set(key, value);
   }
   return map;
 }
@@ -250,20 +282,20 @@ export function findPortOwner(port, protocol, { excludeExtraId = null, excludeSe
 
 export function insertServerExtraPort({ serverId, label, port, protocol }) {
   const id = randomUUID();
-  db.prepare("INSERT INTO server_extra_ports(id, server_id, label, port, protocol) VALUES(?,?,?,?,?)")
-    .run(id, serverId, label, Number(port), protocolOf(protocol));
+  run("INSERT INTO server_extra_ports(id, server_id, label, port, protocol) VALUES(?,?,?,?,?)",
+    id, serverId, label, Number(port), protocolOf(protocol));
   invalidatePortCache(serverId);
   return { id, label, port: Number(port), protocol: protocolOf(protocol) };
 }
 
 export function updateServerExtraPort(serverId, id, { port }) {
-  db.prepare("UPDATE server_extra_ports SET port = ? WHERE id = ? AND server_id = ?")
-    .run(Number(port), id, serverId);
+  run("UPDATE server_extra_ports SET port = ? WHERE id = ? AND server_id = ?",
+    Number(port), id, serverId);
   invalidatePortCache(serverId);
 }
 
 export function deleteServerExtraPort(serverId, id) {
-  db.prepare("DELETE FROM server_extra_ports WHERE server_id = ? AND id = ?").run(serverId, id);
+  run("DELETE FROM server_extra_ports WHERE server_id = ? AND id = ?", serverId, id);
   invalidatePortCache(serverId);
 }
 
@@ -273,8 +305,8 @@ export function deleteServerExtraPort(serverId, id) {
  */
 export function deleteServerPorts(serverId) {
   const remove = db.transaction((id) => {
-    db.prepare("DELETE FROM server_ports WHERE server_id = ?").run(id);
-    db.prepare("DELETE FROM server_extra_ports WHERE server_id = ?").run(id);
+    run("DELETE FROM server_ports WHERE server_id = ?", id);
+    run("DELETE FROM server_extra_ports WHERE server_id = ?", id);
   });
   remove(serverId);
   invalidatePortCache(serverId);
@@ -488,14 +520,14 @@ export function allocateServerPorts(opts = {}) {
 export function saveServerPorts(serverId, ports) {
   const list = Array.isArray(ports) ? ports : [];
   const write = db.transaction(() => {
-    db.prepare("DELETE FROM server_ports WHERE server_id = ?").run(serverId);
+    run("DELETE FROM server_ports WHERE server_id = ?", serverId);
     const insert = db.prepare("INSERT INTO server_ports(server_id, role, port, protocol) VALUES(?,?,?,?)");
     for (const p of list) {
       if (!p || !p.role || !isPortNumber(p.port)) continue;
       insert.run(serverId, p.role, Number(p.port), protocolOf(p.protocol));
     }
     const game = list.find((p) => p.role === "game");
-    if (game) db.prepare("UPDATE servers SET port = ? WHERE id = ?").run(Number(game.port), serverId);
+    if (game) run("UPDATE servers SET port = ? WHERE id = ?", Number(game.port), serverId);
   });
   write();
   invalidatePortCache(serverId);

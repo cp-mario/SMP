@@ -2,7 +2,7 @@ import { Elysia } from "elysia";
 import { existsSync, mkdirSync, statSync, createWriteStream } from "fs";
 import { join } from "path";
 import { Readable } from "stream";
-import { db } from "../core/db.js";
+import { run } from "../core/db.js";
 import { serverFilesDir } from "../core/config.js";
 import { safeName, streamPipeline, clampMemoryMb, parseMemoryMb, formatMemoryMb, normalizeJvmArgs } from "../core/util.js";
 import { getServerRow, createServerRecord, ensureServerDir, resolveUpload, uploadDir } from "../instances/servers.js";
@@ -71,8 +71,8 @@ export const modpackRoute = new Elysia({ prefix: "/api/servers" })
           finalVersion = inst.version || finalVersion;
         }
       }
-      db.prepare("UPDATE servers SET loader=?, loader_version=?, loader_build=?, loader_channel=?, auto_start=? WHERE id=?")
-        .run(finalLoader, finalVersion, finalBuild, channel, auto_start ? 1 : 0, id);
+      run("UPDATE servers SET loader=?, loader_version=?, loader_build=?, loader_channel=?, auto_start=? WHERE id=?",
+        finalLoader, finalVersion, finalBuild, channel, auto_start ? 1 : 0, id);
       // The pack may have installed a different runtime than the one used at creation
       // (for example a Bedrock pack): re-reserve ports for the final loader.
       if (String(finalLoader) !== String(requestedLoader || "vanilla")) {
@@ -87,7 +87,7 @@ export const modpackRoute = new Elysia({ prefix: "/api/servers" })
       const finalMeta = (getLoader(finalLoader) || { meta: () => ({}) }).meta?.() || {};
       if (finalMeta.java) {
         const mem = clampMemoryMb(parseMemoryMb(body.memory_max ?? body.memory ?? "2G", 2048));
-        db.prepare("UPDATE servers SET memory_max=?, jvm_args=? WHERE id=?").run(formatMemoryMb(mem), normalizeJvmArgs(body.jvm_args), id);
+        run("UPDATE servers SET memory_max=?, jvm_args=? WHERE id=?", formatMemoryMb(mem), normalizeJvmArgs(body.jvm_args), id);
       }
       let packVersion = version_id || "";
       let packTitle = name;
@@ -106,8 +106,8 @@ export const modpackRoute = new Elysia({ prefix: "/api/servers" })
         } catch { /* non-fatal: keep the id */ }
       }
       try {
-        db.prepare("INSERT INTO modpacks(id,server_id,source,project_id,version_id,version,title,icon_url,store_url,loader,loader_version,loader_build) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)")
-          .run(crypto.randomUUID(), id, source, project_id || null, version_id || null, packVersion, packTitle, packIcon, packStore, finalLoader, finalVersion, finalBuild);
+        run("INSERT INTO modpacks(id,server_id,source,project_id,version_id,version,title,icon_url,store_url,loader,loader_version,loader_build) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+          crypto.randomUUID(), id, source, project_id || null, version_id || null, packVersion, packTitle, packIcon, packStore, finalLoader, finalVersion, finalBuild);
       } catch { /* non-fatal */ }
       return { id, ok: true, loader: finalLoader, loader_version: finalVersion, loader_build: finalBuild, channel, warnings: result.warnings || [] };
     } catch (e) {
@@ -152,11 +152,11 @@ export const modpackRoute = new Elysia({ prefix: "/api/servers" })
       const finalVersion = result.loader_version || pack.loader_version || row.loader_version || "";
       const finalBuild = result.loader_build || pack.loader_build || row.loader_build || "";
       const channel = result.channel || "stable";
-      db.prepare("UPDATE servers SET loader=?, loader_version=?, loader_build=?, loader_channel=? WHERE id=?")
-        .run(finalLoader, finalVersion, finalBuild, channel, row.id);
+      run("UPDATE servers SET loader=?, loader_version=?, loader_build=?, loader_channel=? WHERE id=?",
+        finalLoader, finalVersion, finalBuild, channel, row.id);
       const versionLabel = latest.version_number || latest.name || latestId;
-      db.prepare("UPDATE modpacks SET version_id=?, version=?, title=?, icon_url=?, store_url=?, loader=?, loader_version=?, loader_build=? WHERE server_id=?")
-        .run(latestId, versionLabel, latest.project_title || pack.title || row.name, latest.icon_url || pack.icon_url || null, latest.store_url || pack.store_url || null, finalLoader, finalVersion, finalBuild, row.id);
+      run("UPDATE modpacks SET version_id=?, version=?, title=?, icon_url=?, store_url=?, loader=?, loader_version=?, loader_build=? WHERE server_id=?",
+        latestId, versionLabel, latest.project_title || pack.title || row.name, latest.icon_url || pack.icon_url || null, latest.store_url || pack.store_url || null, finalLoader, finalVersion, finalBuild, row.id);
       logLine(row.id, `[modpack] Updated to ${versionLabel}`);
       return { ok: true, version: versionLabel, version_id: latestId, loader: finalLoader, loader_version: finalVersion, loader_build: finalBuild, warnings: result.warnings || [] };
     } catch (e) {

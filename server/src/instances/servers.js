@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join, dirname } from "path";
-import { db, queryOne } from "../core/db.js";
+import { queryOne, run } from "../core/db.js";
 import { DATA_DIR, JAVA_DIR, serverPath, serverFilesDir, serverBackupsDir, serverEulaPath, isValidServerId } from "../core/config.js";
 import { parseMemoryMb, formatMemoryMb, clampMemoryMb, normalizeJvmArgs, parseExec } from "../core/util.js";
 import { getLoader, loaderIds } from "../loaders/index.js";
@@ -80,7 +80,7 @@ function createServerRecordSync(body) {
   const id = crypto.randomUUID();
   ensureServerDir(id);
   writeServerEula(id, false);
-  db.prepare("INSERT INTO servers(id,name,dir,loader,loader_version,loader_build,java_version,jar,memory_max,memory_min,port,motd,auto_start,jvm_args) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(id, name, serverPath(id), loader, loader_version || "", loader_build || "", java_version || "", jar, memory_max, memory_min, safePort, motd, auto_start ? 1 : 0, jvm_args);
+  run("INSERT INTO servers(id,name,dir,loader,loader_version,loader_build,java_version,jar,memory_max,memory_min,port,motd,auto_start,jvm_args) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)", id, name, serverPath(id), loader, loader_version || "", loader_build || "", java_version || "", jar, memory_max, memory_min, safePort, motd, auto_start ? 1 : 0, jvm_args);
   const propPath = serverPropPath(id);
   mkdirSync(dirname(propPath), { recursive: true });
   writeFileSync(propPath, loader === "endstone"
@@ -172,7 +172,7 @@ function setProp(id, key, value) {
 }
 
 function setServerPid(id, pid) {
-  try { db.prepare("UPDATE servers SET pid = ?, online = ? WHERE id = ?").run(pid ?? null, pid ? 1 : 0, id); } catch {}
+  try { run("UPDATE servers SET pid = ?, online = ? WHERE id = ?", pid ?? null, pid ? 1 : 0, id); } catch {}
 }
 function getServerRow(id) {
   if (!isValidServerId(id)) return null;

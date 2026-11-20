@@ -1,6 +1,6 @@
 import { Elysia } from "elysia";
 import { existsSync, unlinkSync } from "fs";
-import { db, setSetting, deleteSetting, deleteSettingsLike, getSetting } from "../core/db.js";
+import { db, query, run, setSetting, deleteSetting, deleteSettingsLike, getSetting } from "../core/db.js";
 import { isValidServerId, serverPath, serverFilesDir, hasServerIcon, serverIconVersion } from "../core/config.js";
 import { rmdirRecursive, formatMemoryMb, clampMemoryMb, parseMemoryMb, normalizeJvmArgs, parseExec, flagValue } from "../core/util.js";
 import { jsonResponse } from "../core/http.js";
@@ -10,21 +10,21 @@ import { createBackupRecord, enforceBackupLimit } from "../instances/backupOps.j
 import { getServerUpdateInfo, getModpackUpdateInfo, modpackMeta, getModpackRow } from "../instances/updates.js";
 import { getLoader } from "../loaders/index.js";
 import { sftpEnabledKey, sftpPasswordKey } from "../runtime/sftp.js";
-import { portProfile, serverPortsStatus, allocateServerPorts, saveServerPorts, applyPortsToConfig, isPortNumber, findPortOwner, insertServerExtraPort, updateServerExtraPort, deleteServerExtraPort, getServerExtraPorts, deleteServerPorts, usedPorts, PortConflictError } from "../runtime/ports.js";
+import { portProfile, serverPortsStatus, allocateServerPorts, saveServerPorts, applyPortsToConfig, isPortNumber, findPortOwner, insertServerExtraPort, updateServerExtraPort, deleteServerExtraPort, getServerExtraPorts, deleteServerPorts, usedPorts, invalidatePortCache, PortConflictError } from "../runtime/ports.js";
 
 // ============ SERVERS ============
 export const serversRoute = new Elysia({ prefix: "/api/servers" })
-  .get("/", async ({ request, query }) => {
+  .get("/", async ({ request, query: queryParams }) => {
     // One snapshot for the whole list: per-server lookups would run two
     // queries each (loader ports + plugin ports) plus one reservation scan.
-    const rows = db.prepare("SELECT * FROM servers ORDER BY name ASC").all();
+    const rows = query("SELECT * FROM servers ORDER BY name ASC");
     const sharedPorts = usedPorts();
     const modsByServer = new Map();
-    for (const m of db.prepare("SELECT * FROM mods").all()) {
+    for (const m of query("SELECT * FROM mods")) {
       if (!modsByServer.has(m.server_id)) modsByServer.set(m.server_id, []);
       modsByServer.get(m.server_id).push(modFromRow(m));
     }
-    const withUpdates = String(query?.updates || "") === "1";
+    const withUpdates = String(queryParams?.updates || "") === "1";
     const out = [];
     for (const r of rows) {
       const mods = modsByServer.get(r.id) || [];
@@ -50,14 +50,14 @@ export const serversRoute = new Elysia({ prefix: "/api/servers" })
       return new Response(JSON.stringify({ errors: e?.errors || [e?.message || "Invalid server"] }), { status, headers: { "Content-Type": "application/json" } });
     }
   })
-  .get("/:id", async ({ request, params, query }) => {
+  .get("/:id", async ({ request, params, query: queryParams }) => {
     const row = getServerRow(params.id);
     if (!row) return new Response("Not found", { status: 404 });
-    const mods = db.prepare("SELECT * FROM mods WHERE server_id = ?").all(row.id).map(modFromRow);
+    const mods = query("SELECT * FROM mods WHERE server_id = ?", row.id).map(modFromRow);
     const online = isRunning(row.id);
     if (!online && row.pid) setServerPid(row.id, null);
     const lm = (getLoader(row.loader) || { meta: () => ({}) }).meta?.() || {};
-    const withUpdates = String(query?.updates || "1") !== "0";
+    const withUpdates = String(queryParams?.updates || "1") !== "0";
     const packRow = getModpackRow(row.id);
     let modpack = packRow ? { ...modpackMeta(packRow), update: null } : null;
     let update = null;
@@ -133,13 +133,13 @@ export const serversRoute = new Elysia({ prefix: "/api/servers" })
     const r = runningServers.get(params.id);
     try { if (r?.proc && r.proc.exitCode == null) r.proc.kill("SIGTERM"); } catch {}
     runningServers.delete(params.id);
-    const backups = db.prepare("SELECT path FROM backups WHERE server_id = ?").all(params.id);
+    const backups = query("SELECT path FROM backups WHERE server_id = ?", params.id);
     for (const b of backups) { try { if (b?.path && existsSync(b.path)) unlinkSync(b.path); } catch {} }
-    try { db.prepare("DELETE FROM mods WHERE server_id = ?").run(params.id); } catch {}
-    try { db.prepare("DELETE FROM backups WHERE server_id = ?").run(params.id); } catch {}
-    try { db.prepare("DELETE FROM schedules WHERE server_id = ?").run(params.id); } catch {}
+    try { run("DELETE FROM mods WHERE server_id = ?", params.id); } catch {}
+    try { run("DELETE FROM backups WHERE server_id = ?", params.id); } catch {}
+    try { run("DELETE FROM schedules WHERE server_id = ?", params.id); } catch {}
     try { deleteServerPorts(params.id); } catch {}
-    try { db.prepare("DELETE FROM servers WHERE id = ?").run(params.id); } catch {}
+    try { run("DELETE FROM servers WHERE id = ?", params.id); } catch {}
     try { deleteSettingsLike(`sftp_%_${params.id}`); } catch {}
     try { deleteSetting(sftpEnabledKey(params.id)); } catch {}
     try { deleteSetting(sftpPasswordKey(params.id)); } catch {}
@@ -259,6 +259,8 @@ export const serversRoute = new Elysia({ prefix: "/api/servers" })
     if (fields.length > 0) {
       vals.push(params.id);
       db.prepare(`UPDATE servers SET ${fields.join(", ")} WHERE id = ?`).run(...vals);
+      // `usedPorts` caches the server name join for conflict labels.
+      if (body.name !== undefined) invalidatePortCache();
     }
     if (body.motd !== undefined) setProp(params.id, "motd", body.motd);
     if (allocatedPorts) {

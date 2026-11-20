@@ -1,7 +1,7 @@
 import { Elysia } from "elysia";
 import { existsSync, mkdirSync, readdirSync, unlinkSync } from "fs";
 import { join, dirname, resolve } from "path";
-import { db } from "../core/db.js";
+import { db, query, queryOne, run } from "../core/db.js";
 import { getServerRow, modFromRow, modsFolder, modsFolderFor } from "../instances/servers.js";
 import { safeName } from "../core/util.js";
 import { modsTarget } from "../mods/loaders.js";
@@ -14,14 +14,14 @@ import { invalidateServerUpdateCache } from "../instances/updates.js";
 export const modsRoute = new Elysia({ prefix: "/api/servers/:id/mods" })
   .get("/", ({ params }) => {
     if (!getServerRow(params.id)) return new Response(JSON.stringify({ error: "Not found" }), { status: 404, headers: { "Content-Type": "application/json" } });
-    const rows = db.prepare("SELECT * FROM mods WHERE server_id = ? ORDER BY installed_at DESC").all(params.id);
+    const rows = query("SELECT * FROM mods WHERE server_id = ? ORDER BY installed_at DESC", params.id);
     return { mods: rows.map(modFromRow) };
   })
-  .get("/updates", async ({ params, query }) => {
+  .get("/updates", async ({ params, query: queryParams }) => {
     const row = getServerRow(params.id);
     if (!row) return new Response(JSON.stringify({ error: "Not found" }), { status: 404, headers: { "Content-Type": "application/json" } });
-    const rows = db.prepare("SELECT * FROM mods WHERE server_id = ?").all(params.id);
-    const updates = await findModUpdates(row, rows.map(modFromRow), { force: String(query?.force || "") === "1" });
+    const rows = query("SELECT * FROM mods WHERE server_id = ?", params.id);
+    const updates = await findModUpdates(row, rows.map(modFromRow), { force: String(queryParams?.force || "") === "1" });
     return { updates };
   })
   .post("/", async ({ params, body }) => {
@@ -37,9 +37,9 @@ export const modsRoute = new Elysia({ prefix: "/api/servers/:id/mods" })
     const target = modsTarget(project_type === "datapack" ? "vanilla" : server.loader);
     const dir = modsFolderFor(params.id, server.loader, project_type);
     mkdirSync(dir, { recursive: true });
-    db.prepare(`INSERT INTO mods(id,server_id,source,project_id,version_id,version,filename,enabled,download_url,
+    run(`INSERT INTO mods(id,server_id,source,project_id,version_id,version,filename,enabled,download_url,
       project_title,slug,icon_url,game_versions,loaders,sha1,sha256,sha512,file_size,channel,date_published,changelog,dependencies,store_url,project_type,meta)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       id, params.id, source, project_id || null, version_id || null, version || null, file, enabled ? 1 : 0, download_url || "",
       project_title || null, slug || null, icon_url || null,
       JSON.stringify(game_versions || []), JSON.stringify(loaders || []),
@@ -51,7 +51,7 @@ export const modsRoute = new Elysia({ prefix: "/api/servers/:id/mods" })
       try {
         await downloadFile(download_url, join(dir, file), { sha1, sha256, sha512 });
       } catch (e) {
-        db.prepare("DELETE FROM mods WHERE id = ?").run(id);
+        run("DELETE FROM mods WHERE id = ?", id);
         return new Response(JSON.stringify({ ok: false, error: `Download failed: ${e?.message || e}` }), { status: 502, headers: { "Content-Type": "application/json" } });
       }
     }
@@ -63,7 +63,7 @@ export const modsRoute = new Elysia({ prefix: "/api/servers/:id/mods" })
     const dir = modsFolder(params.id, row.loader);
     if (!existsSync(dir)) return { scanned: 0, found: 0, unknown: [], mods: [] };
     const files = readdirSync(dir).filter((f) => f.toLowerCase().endsWith(".jar")).slice(0, 200);
-    const existing = db.prepare("SELECT * FROM mods WHERE server_id = ?").all(params.id).map(modFromRow);
+    const existing = query("SELECT * FROM mods WHERE server_id = ?", params.id).map(modFromRow);
     const knownNames = new Set(existing.map((m) => m.filename).filter(Boolean));
     const knownHashes = new Set(existing.map((m) => m.sha1).filter(Boolean));
     const projectType = modsTarget(row.loader).kind;
@@ -89,8 +89,7 @@ export const modsRoute = new Elysia({ prefix: "/api/servers/:id/mods" })
       const source = hit.source || "modrinth";
       const existingRow = existing.find((m) => m.filename === filename);
       if (existingRow) {
-        db.prepare(`UPDATE mods SET source=?,project_id=?,version_id=?,version=?,download_url=?,project_title=?,slug=?,icon_url=?,game_versions=?,loaders=?,sha1=?,sha256=?,sha512=?,file_size=?,channel=?,date_published=?,changelog=?,dependencies=?,store_url=?,project_type=?,updated_at=? WHERE id=? AND server_id=?`)
-          .run(
+        run(`UPDATE mods SET source=?,project_id=?,version_id=?,version=?,download_url=?,project_title=?,slug=?,icon_url=?,game_versions=?,loaders=?,sha1=?,sha256=?,sha512=?,file_size=?,channel=?,date_published=?,changelog=?,dependencies=?,store_url=?,project_type=?,updated_at=? WHERE id=? AND server_id=?`,
             source, v.project_id, v.id, v.version_number, file?.url || "",
             v.project_title || existingRow.project_title || null, v.project_slug || existingRow.slug || null,
             v.icon_url || existingRow.icon_url || null,
@@ -103,9 +102,9 @@ export const modsRoute = new Elysia({ prefix: "/api/servers/:id/mods" })
           );
       } else {
         const id = crypto.randomUUID();
-        db.prepare(`INSERT INTO mods(id,server_id,source,project_id,version_id,version,filename,enabled,download_url,
+        run(`INSERT INTO mods(id,server_id,source,project_id,version_id,version,filename,enabled,download_url,
           project_title,slug,icon_url,game_versions,loaders,sha1,sha256,sha512,file_size,channel,date_published,changelog,dependencies,store_url,project_type,meta)
-          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
           id, params.id, source, v.project_id, v.id, v.version_number, filename, 1, file?.url || "",
           v.project_title || null, v.project_slug || null, v.icon_url || null,
           JSON.stringify(v.game_versions || []), JSON.stringify(v.loaders || []),
@@ -118,13 +117,13 @@ export const modsRoute = new Elysia({ prefix: "/api/servers/:id/mods" })
       knownNames.add(filename);
       found++;
     }
-    const mods = db.prepare("SELECT * FROM mods WHERE server_id = ? ORDER BY installed_at DESC").all(params.id).map(modFromRow);
+    const mods = query("SELECT * FROM mods WHERE server_id = ? ORDER BY installed_at DESC", params.id).map(modFromRow);
     return { scanned: files.length, found, unknown, mods };
   })
   .post("/:modId/update", async ({ params, set }) => {
     const server = getServerRow(params.id);
     if (!server) return new Response(JSON.stringify({ ok: false, error: "Not found" }), { status: 404, headers: { "Content-Type": "application/json" } });
-    const raw = db.prepare("SELECT * FROM mods WHERE id = ? AND server_id = ?").get(params.modId, params.id);
+    const raw = queryOne("SELECT * FROM mods WHERE id = ? AND server_id = ?", params.modId, params.id);
     if (!raw) return new Response(JSON.stringify({ ok: false, error: "Not found" }), { status: 404, headers: { "Content-Type": "application/json" } });
     const mod = modFromRow(raw);
     try {
@@ -140,15 +139,14 @@ export const modsRoute = new Elysia({ prefix: "/api/servers/:id/mods" })
       if (mod.filename && mod.filename !== filename) {
         try { const old = join(dir, mod.filename); if (existsSync(old)) unlinkSync(old); } catch { /* ignore */ }
       }
-      db.prepare(`UPDATE mods SET version_id=?,version=?,filename=?,sha1=?,sha256=?,sha512=?,file_size=?,channel=?,date_published=?,game_versions=?,loaders=?,store_url=?,changelog=?,dependencies=?,project_title=?,slug=?,icon_url=?,updated_at=? WHERE id=? AND server_id=?`)
-        .run(
-          latest.id, latest.version_number, filename, file.hashes?.sha1 || null, file.hashes?.sha256 || null, file.hashes?.sha512 || null,
-          Number(file.size) || null, latest.channel || null, latest.date_published || null,
-          JSON.stringify(latest.game_versions || []), JSON.stringify(latest.loaders || []),
-          latest.store_url || null, latest.changelog || "", JSON.stringify(latest.dependencies || []),
-          latest.project_title || mod.project_title || null, latest.project_slug || mod.slug || null,
-          latest.icon_url || mod.icon_url || null, Date.now(), params.modId, params.id,
-        );
+      run(`UPDATE mods SET version_id=?,version=?,filename=?,sha1=?,sha256=?,sha512=?,file_size=?,channel=?,date_published=?,game_versions=?,loaders=?,store_url=?,changelog=?,dependencies=?,project_title=?,slug=?,icon_url=?,updated_at=? WHERE id=? AND server_id=?`,
+        latest.id, latest.version_number, filename, file.hashes?.sha1 || null, file.hashes?.sha256 || null, file.hashes?.sha512 || null,
+        Number(file.size) || null, latest.channel || null, latest.date_published || null,
+        JSON.stringify(latest.game_versions || []), JSON.stringify(latest.loaders || []),
+        latest.store_url || null, latest.changelog || "", JSON.stringify(latest.dependencies || []),
+        latest.project_title || mod.project_title || null, latest.project_slug || mod.slug || null,
+        latest.icon_url || mod.icon_url || null, Date.now(), params.modId, params.id,
+      );
       try { __updateCache.delete(mod.source); } catch { /* ignore */ }
       return { ok: true, version: latest.version_number, version_id: latest.id, filename };
     } catch (e) {
@@ -159,7 +157,7 @@ export const modsRoute = new Elysia({ prefix: "/api/servers/:id/mods" })
   })
   .patch("/:modId", ({ params, body, set }) => {
     if (!getServerRow(params.id)) return new Response(JSON.stringify({ error: "Not found" }), { status: 404, headers: { "Content-Type": "application/json" } });
-    const row = db.prepare("SELECT * FROM mods WHERE id = ? AND server_id = ?").get(params.modId, params.id);
+    const row = queryOne("SELECT * FROM mods WHERE id = ? AND server_id = ?", params.modId, params.id);
     if (!row) return new Response(JSON.stringify({ error: "Not found" }), { status: 404, headers: { "Content-Type": "application/json" } });
     if (!body || typeof body !== "object" || Array.isArray(body)) { set.status = 400; return { ok: false, error: "Invalid body" }; }
     const allowed = ["enabled", "version", "filename", "version_id"];
@@ -177,7 +175,7 @@ export const modsRoute = new Elysia({ prefix: "/api/servers/:id/mods" })
   .delete("/:modId", ({ params }) => {
     const server = getServerRow(params.id);
     if (!server) return new Response(JSON.stringify({ error: "Not found" }), { status: 404, headers: { "Content-Type": "application/json" } });
-    const row = db.prepare("SELECT * FROM mods WHERE id = ? AND server_id = ?").get(params.modId, params.id);
+    const row = queryOne("SELECT * FROM mods WHERE id = ? AND server_id = ?", params.modId, params.id);
     if (!row) return { ok: true };
     const modsDir = modsFolderFor(params.id, server.loader, row.project_type);
     if (row.filename && /^[\w .()+-]+\.(jar|zip)$/i.test(row.filename)) {
@@ -186,7 +184,7 @@ export const modsRoute = new Elysia({ prefix: "/api/servers/:id/mods" })
         if (existsSync(p) && dirname(resolve(p)) === resolve(modsDir)) unlinkSync(p);
       } catch { /* ignore */ }
     }
-    db.prepare("DELETE FROM mods WHERE id = ? AND server_id = ?").run(params.modId, params.id);
+    run("DELETE FROM mods WHERE id = ? AND server_id = ?", params.modId, params.id);
     return { ok: true };
   });
 

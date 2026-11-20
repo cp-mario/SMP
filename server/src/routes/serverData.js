@@ -3,7 +3,7 @@ import { db } from "../core/db.js";
 import { serverFilesDir } from "../core/config.js";
 import { getServerRow, serverDataFromRow, setProp } from "../instances/servers.js";
 import { isRunning } from "../instances/process.js";
-import { allocateServerPorts, saveServerPorts, applyPortsToConfig, PortConflictError } from "../runtime/ports.js";
+import { allocateServerPorts, saveServerPorts, applyPortsToConfig, invalidatePortCache, PortConflictError } from "../runtime/ports.js";
 
 // ============ SERVER DATA ============
 // Raw row editor: exposes the servers table as JSON so advanced users can fix or
@@ -86,6 +86,7 @@ export const serverDataRoute = new Elysia({ prefix: "/api/servers/:id/data" })
 
     vals.push(params.id);
     db.prepare(`UPDATE servers SET ${fields.join(", ")} WHERE id = ?`).run(...vals);
+    if (data.name !== undefined) invalidatePortCache();
 
     // Keep the on-disk properties in sync for the two fields the panel mirrors.
     if (data.motd !== undefined) setProp(params.id, "motd", data.motd);
@@ -137,7 +138,7 @@ export const serverDataRoute = new Elysia({ prefix: "/api/servers/:id/data" })
       else if (typeof data.exec === "object" && !Array.isArray(data.exec)) { fields.push("exec = ?"); vals.push(JSON.stringify(data.exec)); }
       else { set.status = 400; return { ok: false, error: "exec must be an object or null" }; }
     }
-    if (fields.length) { vals.push(params.id); db.prepare(`UPDATE servers SET ${fields.join(", ")} WHERE id = ?`).run(...vals); }
+    if (fields.length) { vals.push(params.id); db.prepare(`UPDATE servers SET ${fields.join(", ")} WHERE id = ?`).run(...vals); if (data.name !== undefined) invalidatePortCache(); }
     if (data.motd !== undefined) setProp(params.id, "motd", data.motd);
     if (allocatedPorts) {
       saveServerPorts(params.id, allocatedPorts);

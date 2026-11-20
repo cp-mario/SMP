@@ -2,7 +2,7 @@ import { Elysia } from "elysia";
 import { existsSync, statSync, mkdirSync, rmSync, renameSync } from "fs";
 import { join } from "path";
 import { Readable } from "stream";
-import { db } from "../core/db.js";
+import { query, queryOne, run } from "../core/db.js";
 import { isValidBackupId, serverPath, serverFilesDir } from "../core/config.js";
 import { attachmentName } from "../core/util.js";
 import { getServerRow } from "../instances/servers.js";
@@ -19,7 +19,7 @@ export const backupsRoute = new Elysia({ prefix: "/api/servers/:id/backups" })
   .get("/", ({ params }) => {
     const server = getServerRow(params.id);
     if (!server) return backupJsonResponse({ error: "Not found" }, 404);
-    const rows = db.prepare("SELECT * FROM backups WHERE server_id = ? ORDER BY created_at DESC, number DESC").all(params.id);
+    const rows = query("SELECT * FROM backups WHERE server_id = ? ORDER BY created_at DESC, number DESC", params.id);
     const limit = backupLimitFor(server);
     const unprotected = rows.filter((row) => !row.protected).length;
     return {
@@ -54,13 +54,13 @@ export const backupsRoute = new Elysia({ prefix: "/api/servers/:id/backups" })
         let kept = 0;
         if (selectedIds) {
           for (const id of selectedIds) {
-            const row = db.prepare("SELECT * FROM backups WHERE id = ? AND server_id = ?").get(id, params.id);
+            const row = queryOne("SELECT * FROM backups WHERE id = ? AND server_id = ?", id, params.id);
             if (!row) continue;
             if (row.protected) { kept++; continue; }
             try { if (deleteBackupRecord(row)) deleted++; } catch {}
           }
         } else {
-          const rows = db.prepare("SELECT * FROM backups WHERE server_id = ?").all(params.id);
+          const rows = query("SELECT * FROM backups WHERE server_id = ?", params.id);
           for (const row of rows) {
             if (row.protected) { kept++; continue; }
             try { if (deleteBackupRecord(row)) deleted++; } catch {}
@@ -96,7 +96,7 @@ export const backupsRoute = new Elysia({ prefix: "/api/servers/:id/backups" })
   })
   .patch("/:backupId", ({ params, body }) => {
     if (!isValidBackupId(params.backupId)) return backupJsonResponse({ ok: false, error: "Not found" }, 404);
-    const row = db.prepare("SELECT * FROM backups WHERE id = ? AND server_id = ?").get(params.backupId, params.id);
+    const row = queryOne("SELECT * FROM backups WHERE id = ? AND server_id = ?", params.backupId, params.id);
     if (!row) return backupJsonResponse({ ok: false, error: "Not found" }, 404);
     const updates = [];
     const values = [];
@@ -111,14 +111,14 @@ export const backupsRoute = new Elysia({ prefix: "/api/servers/:id/backups" })
     }
     if (updates.length) {
       values.push(row.id, params.id);
-      db.prepare(`UPDATE backups SET ${updates.join(", ")} WHERE id = ? AND server_id = ?`).run(...values);
+      run(`UPDATE backups SET ${updates.join(", ")} WHERE id = ? AND server_id = ?`, ...values);
     }
-    const updated = db.prepare("SELECT * FROM backups WHERE id = ? AND server_id = ?").get(params.backupId, params.id);
+    const updated = queryOne("SELECT * FROM backups WHERE id = ? AND server_id = ?", params.backupId, params.id);
     return { ok: true, backup: backupJson(updated) };
   })
   .get("/:backupId/download", async ({ params, query, request }) => {
     if (!isValidBackupId(params.backupId)) return backupJsonResponse({ error: "Not found" }, 404);
-    let row = db.prepare("SELECT * FROM backups WHERE id = ? AND server_id = ?").get(params.backupId, params.id);
+    let row = queryOne("SELECT * FROM backups WHERE id = ? AND server_id = ?", params.backupId, params.id);
     if (!row || !row.path || !existsSync(row.path)) return backupJsonResponse({ error: "Not found" }, 404);
     const format = String(query?.format || "tar.zst").toLowerCase() === "zip" ? "zip" : "tar.zst";
     try {
@@ -160,7 +160,7 @@ export const backupsRoute = new Elysia({ prefix: "/api/servers/:id/backups" })
   })
   .post("/:backupId/restore", async ({ params }) => {
     if (!isValidBackupId(params.backupId)) return backupJsonResponse({ ok: false, error: "Not found" }, 404);
-    const row = db.prepare("SELECT * FROM backups WHERE id = ? AND server_id = ?").get(params.backupId, params.id);
+    const row = queryOne("SELECT * FROM backups WHERE id = ? AND server_id = ?", params.backupId, params.id);
     if (!row || !row.path || !existsSync(row.path)) return backupJsonResponse({ ok: false, error: "Not found" }, 404);
     if (!getServerRow(params.id)) return backupJsonResponse({ ok: false, error: "Not found" }, 404);
     const serverDir = serverPath(params.id);
@@ -212,9 +212,9 @@ export const backupsRoute = new Elysia({ prefix: "/api/servers/:id/backups" })
       return backupJsonResponse({ ok: false, error: e?.message || String(e) }, e?.status || 500);
     }
   })
-  .delete("/:backupId", async ({ params }) => {
-    if (!isValidBackupId(params.backupId)) return backupJsonResponse({ ok: false, error: "Not found" }, 404);
-    const row = db.prepare("SELECT * FROM backups WHERE id = ? AND server_id = ?").get(params.backupId, params.id);
+.delete("/:backupId", async ({ params }) => {
+    if (!isValidBackupId(params.backupId)) return backupJsonResponse({ error: "Not found" }, 404);
+    const row = queryOne("SELECT * FROM backups WHERE id = ? AND server_id = ?", params.backupId, params.id);
     if (!row) return backupJsonResponse({ ok: false, error: "Not found" }, 404);
     try {
       await withBackupLock(params.id, async () => { deleteBackupRecord(row); });
