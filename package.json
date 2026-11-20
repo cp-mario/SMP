@@ -1,9 +1,12 @@
 {
   "name": "smp-main",
-  "version": "0.0.41",
+  "version": "0.0.42",
   "type": "module",
   "description": "Minecraft server panel",
-  "workspaces": ["server", "web"],
+  "workspaces": [
+    "server",
+    "web"
+  ],
   "scripts": {
     "dev": "bun run dev.js",
     "start": "bun run start.js",
