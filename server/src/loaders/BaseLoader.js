@@ -4,7 +4,7 @@ import { join } from "path";
 import { pipeline } from "stream";
 import { Readable } from "stream";
 import { promisify } from "util";
-import { loaderBuildsCache, loaderVersionsCache } from "../cache.js";
+import { loaderBuildsCache, loaderVersionsCache } from "../core/cache.js";
 
 const streamPipeline = promisify(pipeline);
 const FETCH_TIMEOUT = 45000;

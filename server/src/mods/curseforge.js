@@ -1,4 +1,4 @@
-import { getSetting } from "../db.js";
+import { getSetting } from "../core/db.js";
 import { getJson, postJson, StoreError, toInt, asArray, unique, htmlToText, toMs, gameVersionMatches } from "./http.js";
 import { CF_CLASS_IDS, CF_LOADER_TYPES, loaderCompatible } from "./loaders.js";
 

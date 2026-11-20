@@ -1,7 +1,7 @@
 import { createHash } from "crypto";
 import { createReadStream, readFileSync } from "fs";
 import { fetchWithTimeout } from "../loaders/BaseLoader.js";
-import { createTtlCache } from "../cache.js";
+import { createTtlCache } from "../core/cache.js";
 
 const JSON_HEADERS = { Accept: "application/json" };
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";

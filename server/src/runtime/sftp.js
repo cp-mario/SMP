@@ -7,7 +7,7 @@ import {
 } from "fs";
 import { join, resolve, dirname, posix, sep } from "path";
 import { homedir } from "os";
-import { db, getSetting, setSetting } from "./db.js";
+import { db, getSetting, setSetting } from "../core/db.js";
 
 const { Server } = ssh2;
 // ssh2 v1 SFTP constants live under utils.sftp / protocol in some builds; use numeric fallbacks.

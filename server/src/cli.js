@@ -13,7 +13,7 @@ import { existsSync } from "fs";
 import { homedir } from "os";
 import { join, resolve } from "path";
 import { fileURLToPath } from "url";
-import { appVersion, compareVersions, fetchLatestRelease, applyUpdate, RELEASES_FEED } from "./version.js";
+import { appVersion, compareVersions, fetchLatestRelease, applyUpdate, RELEASES_FEED } from "./core/version.js";
 
 function bunCommand() {
   if (process.platform === "win32") {

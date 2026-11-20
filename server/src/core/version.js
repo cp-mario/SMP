@@ -14,7 +14,7 @@ import AdmZip from "adm-zip";
 import { x as untar } from "tar";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-export const ROOT_DIR = resolve(__dirname, "../..");
+export const ROOT_DIR = resolve(__dirname, "../../..");
 
 // The GitHub repository that publishes the releases this panel updates from.
 // SMP_REPO=owner/name overrides it (useful to test against another repo).

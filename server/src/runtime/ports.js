@@ -3,7 +3,7 @@ import dgram from "node:dgram";
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { db, query, queryOne } from "./db.js";
+import { db, query, queryOne } from "../core/db.js";
 
 /**
  * Port management for Minecraft servers.
