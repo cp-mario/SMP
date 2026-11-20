@@ -103,9 +103,10 @@
     try {
       const res = await applyUpdate(latest, channel);
       if (res?.ok) {
-        // Follow the update in a console tab: the panel closes, swaps the files
-        // and restarts (bun install + web build included).
-        window.open("/update", "_blank");
+        // Follow the update in the same tab: the panel closes, swaps the files
+        // and restarts (bun install + web build included), and /update reloads
+        // by itself once the new panel is back.
+        window.location.href = "/update";
         toasts.success(`Updated to ${latest}. The panel is restarting…`);
       } else if (res?.code === "UP_TO_DATE") {
         toasts.success(`Already up to date (${res.version || current}).`);
